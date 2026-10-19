@@ -40,9 +40,11 @@ curl -LsSf https://raw.githubusercontent.com/Manuel-1312/lazyios/main/install.sh
 **3. With pipx or uv.**
 
 ```
-pipx install git+https://github.com/Manuel-1312/lazyios
-uv tool install git+https://github.com/Manuel-1312/lazyios
+uv tool install --python 3.12 git+https://github.com/Manuel-1312/lazyios
+pipx install --python python3.12 git+https://github.com/Manuel-1312/lazyios
 ```
+
+Use Python 3.12: on newer versions a few pymobiledevice3 dependencies have no prebuilt wheels yet and pip tries to compile them.
 
 ## Requirements
 
@@ -86,11 +88,13 @@ Captures and screenshots go to `~/lazyios/captures` and `~/lazyios/screenshots` 
 
 **"Trust This Computer" prompt.** Unlock the phone and tap *Trust*, then enter your passcode. Press `r` in lazyios to retry. If the prompt never shows, unplug, replug and unlock first.
 
-**Developer Mode missing in Settings.** The switch under Settings > Privacy & Security stays hidden until the phone is asked to show it. With the phone plugged in and unlocked, run `uvx pymobiledevice3 amfi reveal-developer-mode`, then turn Developer Mode on in Settings and let the phone restart.
+**Developer Mode missing in Settings.** The switch under Settings > Privacy & Security stays hidden until the phone is asked to show it. With the phone plugged in and unlocked, run `uvx --python 3.12 pymobiledevice3 amfi reveal-developer-mode`, then turn Developer Mode on in Settings and let the phone restart.
 
 **iOS 17+ tunnel / no admin.** Newer iOS versions need a tunnel for developer services. lazyios builds it inside the process with a userspace network stack, so no root or admin is needed. It opens on first use and takes a few seconds.
 
 **Launching an app does nothing.** The phone has to be unlocked.
+
+**"Microsoft Visual C++ 14.0 or greater is required" while installing.** pip picked a Python version that some dependencies have no prebuilt wheels for. Install with Python 3.12 (`uv tool install --python 3.12 ...`) or use the standalone binary.
 
 ## How it compares
 

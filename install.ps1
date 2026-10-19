@@ -9,7 +9,8 @@
         $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
     }
 
-    uv tool install --upgrade https://github.com/Manuel-1312/lazyios/archive/refs/heads/main.zip
+    # 3.12: some pymobiledevice3 deps have no wheels for newer Pythons and would need a C compiler
+    uv tool install --upgrade --python 3.12 https://github.com/Manuel-1312/lazyios/archive/refs/heads/main.zip
     if ($LASTEXITCODE -ne 0) { throw "uv tool install failed" }
 
     $apple = (Get-AppxPackage AppleInc.AppleDevices -ErrorAction SilentlyContinue) -or
