@@ -9,7 +9,7 @@ if ! command -v uv >/dev/null 2>&1; then
 fi
 
 # 3.12: some pymobiledevice3 deps have no wheels for newer Pythons and would need a C compiler
-uv tool install --upgrade --python 3.12 https://github.com/Manuel-1312/lazyios/archive/refs/heads/main.zip
+uv tool install --upgrade --python 3.12 lazyios
 
 if [ "$(uname -s)" = "Linux" ] && ! command -v usbmuxd >/dev/null 2>&1 && [ ! -x /usr/sbin/usbmuxd ]; then
     echo

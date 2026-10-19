@@ -1,6 +1,7 @@
 # lazyios
 
 [![ci](https://github.com/Manuel-1312/lazyios/actions/workflows/ci.yml/badge.svg)](https://github.com/Manuel-1312/lazyios/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/lazyios)](https://pypi.org/project/lazyios/)
 [![license](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
 
 Like lazygit, but for your iPhone. A keyboard-driven terminal app that talks to an iPhone over USB: read the system log, list and kill processes, launch apps, capture network traffic to a `.pcap`, throttle the network, take screenshots, fake a location, watch FPS. It runs on Windows, macOS and Linux, needs no jailbreak, no Xcode and no admin rights. Built on [Textual](https://github.com/Textualize/textual), using [pymobiledevice3](https://github.com/doronz88/pymobiledevice3) as a library.
@@ -37,11 +38,11 @@ irm https://raw.githubusercontent.com/Manuel-1312/lazyios/main/install.ps1 | iex
 curl -LsSf https://raw.githubusercontent.com/Manuel-1312/lazyios/main/install.sh | sh  # macOS, Linux
 ```
 
-**3. With pipx or uv.**
+**3. From PyPI.**
 
 ```
-uv tool install --python 3.12 git+https://github.com/Manuel-1312/lazyios
-pipx install --python python3.12 git+https://github.com/Manuel-1312/lazyios
+uv tool install --python 3.12 lazyios
+pipx install --python python3.12 lazyios
 ```
 
 Use Python 3.12: on newer versions a few pymobiledevice3 dependencies have no prebuilt wheels yet and pip tries to compile them.
