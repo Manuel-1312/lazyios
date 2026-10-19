@@ -51,6 +51,7 @@ from .backend import (
 from .parsing import link_offset, parse_ip_packet
 
 LAUNCH_TIMEOUT = 15
+PAYLOAD_MAX = 2048  # enough for a DNS answer or the start of a TLS ClientHello
 
 
 @asynccontextmanager
@@ -85,6 +86,7 @@ def _packet(p: DevicePacket) -> Packet:
         src=info.src if info else "-",
         dst=info.dst if info else "-",
         length=len(p.data),
+        payload=info.payload[:PAYLOAD_MAX] if info and info.proto in ("tcp", "udp") else b"",
     )
 
 

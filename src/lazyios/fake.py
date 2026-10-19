@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import ipaddress
 import random
 import struct
 import time
+from collections import deque
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 
@@ -112,26 +114,112 @@ _CONDITIONS = [
 ]
 
 
-def _ipv4(proto: int, src: bytes, dst: bytes, sport: int, dport: int, payload: int) -> bytes:
-    l4 = struct.pack("!HHIIBBHHH", sport, dport, 0, 0, 0x50, 0x10, 1024, 0, 0)
+def _ipv4(proto: int, src: bytes, dst: bytes, sport: int, dport: int, payload: bytes) -> bytes:
     if proto == 17:
-        l4 = struct.pack("!HHHH", sport, dport, 8 + payload, 0)
-    body = l4 + bytes(payload)
+        l4 = struct.pack("!HHHH", sport, dport, 8 + len(payload), 0)
+    else:
+        flags = 0x18 if payload else 0x10
+        l4 = struct.pack("!HHIIBBHHH", sport, dport, 0, 0, 0x50, flags, 1024, 0, 0)
+    body = l4 + payload
     head = struct.pack("!BBHHHBBH4s4s", 0x45, 0, 20 + len(body), 0, 0, 64, proto, 0, src, dst)
     return head + body
 
 
-# process, pid, proto, dst ip, dst port
-_FLOWS = [
-    ("apsd", 122, "tcp", "17.188.164.12", 5223),
-    ("Safari", 912, "tcp", "142.250.178.142", 443),
-    ("Safari", 912, "tcp", "151.101.1.69", 443),
-    ("Maps", 1033, "tcp", "17.253.144.10", 443),
-    ("cloudd", 140, "tcp", "17.138.175.250", 443),
-    ("mDNSResponder", 70, "udp", "192.168.0.1", 53),
-    ("mDNSResponder", 70, "udp", "192.168.0.1", 53),
-    ("", 0xFFFFFFFF, "udp", "192.168.0.255", 57621),
-]
+def _dns_name(name: str) -> bytes:
+    return b"".join(bytes([len(label)]) + label.encode() for label in name.split(".")) + b"\0"
+
+
+def _dns_response(qname: str, ip: str, cname: str | None = None, v6: str | None = None) -> bytes:
+    """A DNS answer for qname, through a CNAME hop when given; names point back by compression."""
+    question = _dns_name(qname) + struct.pack("!HH", 1, 1)
+    owner, records, count = b"\xc0\x0c", b"", 1 + bool(cname) + bool(v6)
+    if cname:
+        target = _dns_name(cname)
+        records += owner + struct.pack("!HHIH", 5, 1, 300, len(target)) + target
+        owner = struct.pack("!H", 0xC000 | (12 + len(question) + 12))  # the CNAME target
+    records += owner + struct.pack("!HHIH", 1, 1, 60, 4) + ipaddress.IPv4Address(ip).packed
+    if v6:
+        records += owner + struct.pack("!HHIH", 28, 1, 60, 16) + ipaddress.IPv6Address(v6).packed
+    return struct.pack("!HHHHHH", 0x1234, 0x8180, 1, count, 0, 0) + question + records
+
+
+def _client_hello(host: str) -> bytes:
+    name = host.encode()
+    sni = struct.pack("!HBH", len(name) + 3, 0, len(name)) + name
+    exts = struct.pack("!HH", 0, len(sni)) + sni
+    exts += struct.pack("!HHHH", 10, 4, 2, 0x001D) + struct.pack("!HHBH", 43, 3, 2, 0x0304)
+    body = struct.pack("!H", 0x0303) + bytes(range(32)) + b"\x20" + bytes(32)
+    body += struct.pack("!HHH", 4, 0x1301, 0x1302) + b"\x01\x00"
+    body += struct.pack("!H", len(exts)) + exts
+    hello = b"\x01" + len(body).to_bytes(3, "big") + body
+    return b"\x16\x03\x01" + struct.pack("!H", len(hello)) + hello
+
+
+LOCAL = "192.168.0.204"
+RESOLVER = "192.168.0.1"
+# app, pid, [(host, cname)]; a host of None is a bare address nobody looked up
+_TRAFFIC = [
+    ("FitTrack", 1101, [
+        ("api.fittrack.example", None), ("sync.fittrack.example", None),
+        ("static.fittrack.example", None),
+        ("cdn.fittrack.example", "cdn.fittrack.example.edge.example"),
+        ("gateway.icloud.com", None), ("app-measurement.com", None), ("graph.facebook.com", None),
+        ("api.mixpanel.com", None), ("firebase-settings.crashlytics.com", None),
+    ]),
+    ("NewsDaily", 1102, [
+        ("api.newsdaily.example", None), ("fonts.newsdaily.example", None),
+        ("video.newsdaily.example", None),
+        ("img.newsdaily.example", "img.newsdaily.example.edge.example"),
+        ("googleads.g.doubleclick.net", None), ("app.adjust.com", None),
+        ("sdk.iad-01.braze.com", None),
+    ]),
+    ("PhotoBox", 1103, [
+        ("api.photobox.example", None), ("upload.photobox.example", None),
+        ("cdn.photobox.example", "cdn.photobox.example.edge.example"), ("gateway.icloud.com", None),
+        ("firebase-settings.crashlytics.com", None), ("api2.branch.io", None), (None, None),
+    ]),
+    ("Weatherly", 1104, [
+        ("api.weatherly.example", None), ("radar.weatherly.example", None),
+        ("tiles.weatherly.example", "tiles.weatherly.example.edge.example"),
+        ("googleads.g.doubleclick.net", None), ("app-measurement.com", None),
+    ]),
+    ("QuickChat", 1105, [
+        ("chat.quickchat.example", None), ("push.quickchat.example", None),
+        ("media.quickchat.example", "media.quickchat.example.edge.example"),
+        ("api.mixpanel.com", None), ("sdk.iad-01.braze.com", None),
+    ]),
+    ("cloudd", 140, [("gateway.icloud.com", None)]),
+    ("apsd", 122, [("courier.push.apple.com", None)]),
+]  # fmt: skip
+_HOSTS = sorted({h for _, _, hosts in _TRAFFIC for h, _ in hosts if h})
+_BLOCKS = ("203.0.113", "198.51.100", "192.0.2")  # documentation ranges, never real servers
+
+
+def _address(host: str | None) -> str:
+    i = _HOSTS.index(host) if host else len(_HOSTS)
+    return f"{_BLOCKS[i // 254 % 3]}.{i % 254 + 1}"
+
+
+# process, pid, outbound, protocol, remote port, payload, remote address
+Frame = tuple[str, int, bool, str, int, bytes, str]
+
+
+def _open_flow(
+    proc: str, pid: int, host: str | None, cname: str | None, resolved: set[str]
+) -> list[Frame]:
+    """Frames that start a connection: the DNS answer (once per host), then the first segments."""
+    ip = _address(host)
+    if host is None:
+        return [(proc, pid, True, "udp", 443, bytes(1200), ip)]
+    frames: list[Frame] = []
+    if host not in resolved:
+        resolved.add(host)
+        v6 = f"2001:db8::{ip.rsplit('.', 1)[1]}" if len(resolved) % 3 == 0 else None
+        answer = _dns_response(host, ip, cname, v6)
+        frames.append(("mDNSResponder", 70, False, "udp", 53, answer, RESOLVER))
+    frames.append((proc, pid, True, "tcp", 443, b"", ip))
+    frames.append((proc, pid, True, "tcp", 443, _client_hello(host), ip))
+    return frames
 
 
 def _pcap_header() -> bytes:
@@ -158,6 +246,7 @@ class FakeBackend:
         self.launched: list[str] = []
         self.cleared_conditions = 0
         self.cleared_locations = 0
+        self.captures = 0
         self.closed = False
         self.on_reset: Callable[[], None] | None = None
         self.clear_failures = 0
@@ -222,28 +311,65 @@ class FakeBackend:
 
     async def capture(self, path: Path) -> AsyncIterator[Packet]:
         self._need_device()
+        self.captures += 1
         path.parent.mkdir(parents=True, exist_ok=True)
         rng = random.Random(7)
+        fresh = [(proc, pid, host, cname) for proc, pid, hosts in _TRAFFIC for host, cname in hosts]
+        rng.shuffle(fresh)
+        ports: dict[tuple[str, str], int] = {}  # (process, remote address) -> local port
+        flows: list[tuple[str, int, str | None]] = []
+        resolved: set[str] = set()
+        queue: deque[Frame] = deque()
         with path.open("wb") as out:
             out.write(_pcap_header())
             while True:
                 await asyncio.sleep(self.interval)
-                proc, pid, proto, host, dport = rng.choice(_FLOWS)
-                sport = rng.randint(49152, 65535)
+                if not queue:
+                    if fresh and (not flows or rng.random() < 0.7):
+                        proc, pid, host, cname = fresh.pop()
+                        flows.append((proc, pid, host))
+                        queue.extend(_open_flow(proc, pid, host, cname, resolved))
+                    else:
+                        proc, pid, host = rng.choice(flows)
+                        size = rng.choice((0, 32, 120, 517, 1200, 1400))
+                        proto = "udp" if host is None else "tcp"
+                        if rng.random() < 0.15:  # the app opens another connection
+                            ports.pop((proc, _address(host)), None)
+                        frame = (proc, pid, rng.random() < 0.4, proto, 443, bytes(size))
+                        queue.append((*frame, _address(host)))
+                    if rng.random() < 0.1:  # local chatter no app owns
+                        queue.append(
+                            ("", 0xFFFFFFFF, True, "udp", 57621, bytes(60), "192.168.0.255")
+                        )
+                proc, pid, outbound, proto, port, payload, remote = queue.popleft()
+                if (proc, remote) not in ports:
+                    ports[proc, remote] = rng.randint(49152, 65535)
+                local = ports[proc, remote]
+                src, dst = (LOCAL, remote) if outbound else (remote, LOCAL)
+                sp, dp = (local, port) if outbound else (port, local)
                 raw = _ipv4(
                     6 if proto == "tcp" else 17,
-                    bytes([192, 168, 0, 204]),
-                    bytes(map(int, host.split("."))),
-                    sport,
-                    dport,
-                    rng.choice((0, 0, 32, 120, 517, 1200, 1400)),
+                    ipaddress.IPv4Address(src).packed,
+                    ipaddress.IPv4Address(dst).packed,
+                    sp,
+                    dp,
+                    payload,
                 )
                 now = time.time()
                 out.write(struct.pack("<IIII", int(now), int(now % 1 * 1e6), len(raw), len(raw)))
                 out.write(raw)
                 out.flush()
-                src, dst = f"192.168.0.204:{sport}", f"{host}:{dport}"
-                yield Packet(now, pid, proc, "en0", proto, src, dst, len(raw) + 14)
+                yield Packet(
+                    now,
+                    pid,
+                    proc,
+                    "en0",
+                    proto,
+                    f"{src}:{sp}",
+                    f"{dst}:{dp}",
+                    len(raw) + 14,
+                    payload,
+                )
 
     async def conditions(self) -> list[Condition]:
         await self.open_tunnel()

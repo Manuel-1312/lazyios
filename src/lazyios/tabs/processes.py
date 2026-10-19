@@ -64,7 +64,7 @@ class ProcessesTab(TableTab[Process]):
         except BackendError as e:
             self.lazy.report(e)
             return
-        self.app.notify(f"killed {process.name} [{process.pid}]")
+        self.app.notify(f"killed {process.name} [{process.pid}]", markup=False)
         await self.load()
 
     def action_launch(self) -> None:

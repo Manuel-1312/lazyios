@@ -73,6 +73,10 @@ class TableTab(TabBody, Generic[T]):
     def haystack(self, item: T) -> tuple[str, ...]:
         raise NotImplementedError
 
+    def accepts(self, item: T) -> bool:
+        """Extra per-tab row filter, applied together with the text filter."""
+        return True
+
     def compose(self) -> ComposeResult:
         yield Static(header(self.title), classes="head")
         yield Input(placeholder="/ filter", id="filter")
@@ -101,7 +105,9 @@ class TableTab(TabBody, Generic[T]):
         keep = self.selected()
         needle = self.query_one("#filter", Input).value
         table.clear()
-        shown = [i for i in self.items if matches_filter(needle, *self.haystack(i))]
+        shown = [
+            i for i in self.items if self.accepts(i) and matches_filter(needle, *self.haystack(i))
+        ]
         for item in shown:
             table.add_row(*self.cells(item), key=self.key(item))
         if keep is not None:

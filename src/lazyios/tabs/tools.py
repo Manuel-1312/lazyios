@@ -102,7 +102,7 @@ class ToolsTab(TabBody):
         try:
             opener.open_default(self.last_shot)
         except OSError as e:
-            self.app.notify(f"cannot open: {e}", severity="error")
+            self.app.notify(f"cannot open: {e}", severity="error", markup=False)
 
     def action_edit_location(self) -> None:
         self.query_one("#lat", Input).focus()

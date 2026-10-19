@@ -12,7 +12,7 @@ from .art import header
 
 HELP = """\
  global
-   1-6        switch tab
+   1-7        switch tab
    q          quit (clears condition and location)
    ?          this help
    /          focus the filter, esc to leave it
@@ -25,6 +25,8 @@ HELP = """\
              enter apply condition      x clear condition
  tools       s screenshot   o open it   l coordinates
              enter set location   x clear location   f fps
+ privacy     space start/stop capture   s sort   t trackers only
+             e export report   o open it   / filter
 """
 
 

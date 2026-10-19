@@ -84,6 +84,7 @@ class Packet:
     src: str
     dst: str
     length: int
+    payload: bytes = b""  # start of the TCP/UDP payload, for DNS and TLS parsing
 
 
 @dataclass(frozen=True)

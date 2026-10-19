@@ -11,6 +11,7 @@ for package in ("lazyios", "textual", "rich", "pymobiledevice3", "pmd_pytcp", "p
     binaries += b
     hiddenimports += h
 datas += copy_metadata("lazyios") + copy_metadata("textual")
+datas += [(str(here.parent / "src" / "lazyios" / "data"), "lazyios/data")]  # tracker list
 
 a = Analysis(
     [str(here / "entry.py")],

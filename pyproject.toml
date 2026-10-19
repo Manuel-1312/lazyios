@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "lazyios"
 version = "0.1.1"
-description = "Terminal UI to control your iPhone from Windows, macOS and Linux: syslog, processes, apps, packet capture, network conditions. No jailbreak, no Xcode."
+description = "Terminal UI to control your iPhone from Windows, macOS and Linux: see which apps talk to which servers and trackers, syslog, processes, packet capture, network conditions. No jailbreak, no Xcode."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "GPL-3.0-or-later"
@@ -15,6 +15,7 @@ keywords = [
     "iphone", "ios", "tui", "terminal", "textual", "pymobiledevice3", "usbmuxd", "syslog",
     "pcap", "wireshark", "packet-capture", "network-conditioner", "developer-mode",
     "ios-debugging", "ios-17", "lazygit", "libimobiledevice", "idevicesyslog",
+    "privacy", "trackers", "tracker-detection", "app-privacy-report", "network-monitor", "dns",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",

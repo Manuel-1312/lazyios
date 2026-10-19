@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections import deque
-from contextlib import aclosing
 from datetime import datetime
 from pathlib import Path
 
@@ -9,11 +8,11 @@ from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.widgets import DataTable, Static
-from textual.worker import Worker
 
 from .. import opener
 from ..art import header
 from ..backend import BackendError, Condition, Packet
+from ..parsing import clean_text
 from ..theme import ACID, GRAY, RED
 from .base import TabBody
 
@@ -30,13 +29,15 @@ COLUMNS = (
 
 
 def packet_cells(p: Packet) -> tuple[Text | str, ...]:
+    """Text cells, so device-supplied names are never read as markup."""
     stamp = datetime.fromtimestamp(p.time).strftime("%H:%M:%S.%f")[:-3]
+    name = clean_text(p.process)
     return (
         stamp,
-        f"{p.process}({p.pid})" if p.pid != 0xFFFFFFFF else p.process or "-",
-        p.interface,
-        p.proto,
-        f"{p.src} -> {p.dst}",
+        Text(f"{name}({p.pid})" if p.pid != 0xFFFFFFFF else name or "-"),
+        Text(clean_text(p.interface)),
+        Text(p.proto),
+        Text(f"{p.src} -> {p.dst}"),
         Text(str(p.length), justify="right"),
     )
 
@@ -52,13 +53,17 @@ class NetworkTab(TabBody):
 
     def __init__(self, **kwargs: object) -> None:
         super().__init__(**kwargs)
-        self.capturing = False
         self.count = 0
-        self.last_path: Path | None = None
-        self.pending: list[Packet] = []
         self.keys: deque[int] = deque()
         self.conditions: list[Condition] = []
-        self._worker: Worker[None] | None = None
+
+    @property
+    def capturing(self) -> bool:
+        return self.lazy.capturing
+
+    @property
+    def last_path(self) -> Path | None:
+        return self.lazy.last_capture
 
     def compose(self) -> ComposeResult:
         yield Static(header("capture"), classes="head")
@@ -123,7 +128,9 @@ class NetworkTab(TabBody):
             return
         self.lazy.update_status()
         self.render_conditions()
-        self.app.notify(f"condition active: {condition.profile_id}", severity="warning")
+        self.app.notify(
+            f"condition active: {condition.profile_id}", severity="warning", markup=False
+        )
 
     def action_clear_condition(self) -> None:
         self.lazy.run_task(self._clear(), group="condition")
@@ -137,31 +144,15 @@ class NetworkTab(TabBody):
         self.render_conditions()
 
     def action_toggle_capture(self) -> None:
-        if self._worker is not None and self.capturing:
-            self._worker.cancel()
-            return
-        stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")[:-3]
-        path = self.lazy.out_dir / "captures" / f"capture-{stamp}.pcap"
-        self.capturing = True
-        self._worker = self.lazy.run_task(self._capture(path), group="capture")
+        self.lazy.toggle_capture()
 
-    async def _capture(self, path: Path) -> None:
+    def reset(self) -> None:
         self.count = 0
-        self.last_path = path
         self.query_one("#packets", DataTable).clear()
         self.keys.clear()
-        try:
-            async with aclosing(self.lazy.backend.capture(path)) as packets:
-                async for packet in packets:
-                    self.pending.append(packet)
-        except BackendError as e:
-            self.lazy.report(e)
-        finally:
-            self.capturing = False
-            self.flush()
 
     def flush(self) -> None:
-        batch, self.pending = self.pending, []
+        batch, self.lazy.pending = self.lazy.pending, []
         packets = self.query_one("#packets", DataTable)
         if len(batch) >= MAX_ROWS:  # burst: the table would be replaced anyway
             self.count += len(batch) - MAX_ROWS
@@ -200,6 +191,6 @@ class NetworkTab(TabBody):
         try:
             program = opener.open_capture(self.last_path)
         except OSError as e:
-            self.app.notify(f"cannot open: {e}", severity="error")
+            self.app.notify(f"cannot open: {e}", severity="error", markup=False)
             return
-        self.app.notify(f"opened in {program}")
+        self.app.notify(f"opened in {program}", markup=False)

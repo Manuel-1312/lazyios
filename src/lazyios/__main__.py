@@ -47,7 +47,10 @@ async def _selftest() -> None:
 
     from . import device  # noqa: F401
     from .fake import FakeBackend
+    from .privacy import TrackerDB
 
+    if not TrackerDB().lookup("sdk.iad-01.braze.com"):
+        raise RuntimeError("tracker data missing")
     with tempfile.TemporaryDirectory() as out:
         app = LazyiosApp(FakeBackend(interval=0.01), Path(out))
         async with app.run_test(size=(100, 30)) as pilot:

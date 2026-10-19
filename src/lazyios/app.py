@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Coroutine
-from contextlib import suppress
+from contextlib import aclosing, suppress
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +12,8 @@ from textual.binding import Binding
 from textual.widgets import Footer, Static, TabbedContent, TabPane
 from textual.worker import Worker
 
-from .backend import Backend, BackendError, Battery, DeviceInfo, DevModeOffError
+from .backend import Backend, BackendError, Battery, DeviceInfo, DevModeOffError, Packet
+from .privacy import HostAggregator
 from .screens import Help
 from .status import status_line
 from .tabs.apps import AppsTab
@@ -19,6 +21,7 @@ from .tabs.base import TabBody
 from .tabs.logs import LogsTab
 from .tabs.network import NetworkTab
 from .tabs.overview import OverviewTab
+from .tabs.privacy import PrivacyTab
 from .tabs.processes import ProcessesTab
 from .tabs.tools import ToolsTab
 from .theme import UNDERGROUND
@@ -30,6 +33,7 @@ TABS: list[tuple[str, type[TabBody]]] = [
     ("apps", AppsTab),
     ("network", NetworkTab),
     ("tools", ToolsTab),
+    ("privacy", PrivacyTab),
 ]
 BATTERY_REFRESH = 30
 SHUTDOWN_TIMEOUT = 15
@@ -56,6 +60,11 @@ class LazyiosApp(App[None]):
         self.dev_mode: bool | None = None
         self.tunnel = "off"
         self.problem: BackendError | None = None
+        self.capturing = False
+        self.last_capture: Path | None = None
+        self.pending: list[Packet] = []  # captured, not yet shown in the packet table
+        self.aggregator = HostAggregator()
+        self._capture_worker: Worker[None] | None = None
 
     def compose(self) -> ComposeResult:
         yield Static(id="status")
@@ -99,7 +108,7 @@ class LazyiosApp(App[None]):
             self.report(BackendError(f"{group.split('-')[0]} failed: {type(e).__name__}"))
 
     def report(self, error: Exception) -> None:
-        self.notify(str(error), title="error", severity="error", timeout=6)
+        self.notify(str(error), title="error", severity="error", timeout=6, markup=False)
 
     def tick(self) -> None:
         self.run_task(self.refresh_device(battery_only=self.info is not None), group="refresh")
@@ -122,9 +131,42 @@ class LazyiosApp(App[None]):
     def update_status(self) -> None:
         self.query_one("#status", Static).update(
             status_line(
-                self.info, self.battery, self.dev_mode, self.backend.active_condition, self.tunnel
+                self.info,
+                self.battery,
+                self.dev_mode,
+                self.backend.active_condition,
+                self.tunnel,
+                self.capturing,
             )
         )
+
+    def toggle_capture(self) -> None:
+        """Start or stop the one capture that feeds the packet table and the privacy tab."""
+        if self._capture_worker is not None and self.capturing:
+            self._capture_worker.cancel()
+            return
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")[:-3]
+        self.last_capture = self.out_dir / "captures" / f"capture-{stamp}.pcap"
+        self.capturing = True
+        self.pending = []
+        self.aggregator.reset()
+        self.query_one(NetworkTab).reset()
+        self.update_status()
+        self._capture_worker = self.run_task(self._capture(self.last_capture), group="capture")
+
+    async def _capture(self, path: Path) -> None:
+        try:
+            async with aclosing(self.backend.capture(path)) as packets:
+                async for packet in packets:
+                    self.pending.append(packet)
+                    self.aggregator.feed(packet)
+        except BackendError as e:
+            self.report(e)
+        finally:
+            self.capturing = False
+            self.update_status()
+            self.query_one(NetworkTab).flush()
+            self.query_one(PrivacyTab).refresh_view(force=True)
 
     async def open_dvt(self) -> str | None:
         """Open the tunnel if needed; returns a message when developer services are unavailable."""
@@ -149,10 +191,10 @@ class LazyiosApp(App[None]):
 
     async def launch(self, bundle_id: str) -> None:
         if message := await self.open_dvt():
-            self.notify(message, severity="error")
+            self.notify(message, severity="error", markup=False)
             return
         pid = await self.backend.launch(bundle_id)
-        self.notify(f"launched {bundle_id} (pid {pid})")
+        self.notify(f"launched {bundle_id} (pid {pid})", markup=False)
 
     def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
         event.pane.query_one(TabBody).activate()

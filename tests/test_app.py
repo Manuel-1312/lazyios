@@ -3,6 +3,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+from rich.text import Text
 from textual.widgets import DataTable, RichLog, Static, TabbedContent
 
 from lazyios import usbmuxd
@@ -11,6 +12,7 @@ from lazyios.backend import BackendError, NotTrustedError, UsbmuxdError
 from lazyios.fake import FakeBackend
 from lazyios.tabs.logs import LogsTab
 from lazyios.tabs.network import NetworkTab
+from lazyios.tabs.privacy import PrivacyTab
 from lazyios.tabs.processes import ProcessesTab
 
 SIZE = (120, 40)
@@ -46,7 +48,9 @@ async def test_tab_switching(tmp_path):
     async with app.run_test(size=SIZE) as pilot:
         tabs = app.query_one(TabbedContent)
         for key, name in zip(
-            "123456", ("overview", "logs", "processes", "apps", "network", "tools"), strict=True
+            "1234567",
+            ("overview", "logs", "processes", "apps", "network", "tools", "privacy"),
+            strict=True,
         ):
             await pilot.press(key)
             await pilot.pause()
@@ -167,7 +171,7 @@ async def test_capture_table_is_capped(tmp_path):
     app, _ = make(tmp_path)
     async with app.run_test(size=SIZE) as pilot:
         tab = app.query_one(NetworkTab)
-        tab.pending = [Packet(1.0, 1, "p", "en0", "tcp", "a", "b", 10) for _ in range(1200)]
+        app.pending = [Packet(1.0, 1, "p", "en0", "tcp", "a", "b", 10) for _ in range(1200)]
         tab.flush()
         await pilot.pause()
         assert tab.query_one("#packets", DataTable).row_count == 1000
@@ -338,3 +342,182 @@ def test_version_and_selftest(capsys):
 
     assert selftest() == 0
     assert "selftest ok" in capsys.readouterr().out
+
+
+def privacy_rows(tab) -> list[tuple[str, ...]]:
+    table = tab.query_one("#table", DataTable)
+    return [tuple(c.plain for c in table.get_row_at(i)) for i in range(table.row_count)]
+
+
+async def start_privacy(pilot, app, rows: int = 12) -> PrivacyTab:
+    await pilot.press("7", "space")
+    tab = app.query_one(PrivacyTab)
+    await until(pilot, lambda: len(app.aggregator.rows()) >= rows)
+    tab.refresh_view(force=True)
+    await pilot.pause()
+    return tab
+
+
+async def test_privacy_tab_shows_rows_and_summary(tmp_path):
+    app, _ = make(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        tab = app.query_one(PrivacyTab)
+        await pilot.press("7")
+        assert "press space to start a capture" in str(tab.query_one(".notice").content)
+        await start_privacy(pilot, app)
+        assert tab.query_one("#table", DataTable).row_count >= 12
+        assert "apps ::" in text_of(app, "#summary") and "trackers" in text_of(app, "#summary")
+        assert "capture on" in text_of(app, "#status")
+        assert not tab.query_one(".notice").display
+        categories = {row[2] for row in privacy_rows(tab)}
+        assert categories & {"ads", "analytics"}
+        await pilot.press("space")
+        await until(pilot, lambda: not app.capturing)
+        assert "capture on" not in text_of(app, "#status")
+
+
+async def test_privacy_trackers_only_and_sort_cycle(tmp_path):
+    app, _ = make(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        tab = await start_privacy(pilot, app, rows=20)
+        await pilot.press("space")
+        await until(pilot, lambda: not app.capturing)
+        total = tab.query_one("#table", DataTable).row_count
+        await pilot.press("t")
+        await pilot.pause()
+        shown = privacy_rows(tab)
+        assert 0 < len(shown) < total
+        assert {row[2] for row in shown} <= {"ads", "analytics", "social", "telemetry"}
+        assert "trackers only" in text_of(app, "#summary")
+        await pilot.press("t")
+        await pilot.pause()
+        assert tab.query_one("#table", DataTable).row_count == total
+        seen = []
+        for _ in range(4):
+            seen.append(tab.sort)
+            await pilot.press("s")
+            await pilot.pause()
+        assert seen == ["bytes", "flows", "app", "domain"]
+        assert tab.sort == "bytes"
+        await pilot.press("s", "s")
+        await pilot.pause()
+        apps = [row[0] for row in privacy_rows(tab)]
+        assert apps == sorted(apps, key=str.lower)
+
+
+async def test_privacy_keys_are_text_in_the_filter(tmp_path):
+    app, _ = make(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        tab = await start_privacy(pilot, app)
+        await pilot.press("slash", "t", "e", "s", "space")
+        await pilot.pause()
+        assert tab.query_one("#filter").value == "tes "
+        assert (tab.sort, tab.trackers_only) == ("bytes", False)
+        assert tab.last_report is None
+
+
+async def test_privacy_filter_narrows(tmp_path):
+    app, _ = make(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        tab = await start_privacy(pilot, app, rows=20)
+        total = tab.query_one("#table", DataTable).row_count
+        await pilot.press("slash", *"quick")
+        await pilot.pause()
+        shown = privacy_rows(tab)
+        assert 0 < len(shown) < total
+        assert all("quickchat" in " ".join(row).lower() for row in shown)
+
+
+async def test_privacy_export_writes_json_and_csv(tmp_path, monkeypatch):
+    import csv
+    import json
+
+    from lazyios import opener
+
+    opened = []
+    monkeypatch.setattr(opener, "open_default", opened.append)
+    app, _ = make(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.press("7", "e")
+        await pilot.pause()
+        assert not (tmp_path / "reports").exists()  # nothing captured yet
+        await start_privacy(pilot, app, rows=15)
+        await pilot.press("e")
+        await pilot.pause()
+        (report,) = (tmp_path / "reports").glob("*.json")
+        data = json.loads(report.read_text(encoding="utf-8"))
+        assert data["summary"]["apps"] >= 3
+        assert {"app", "domain", "category", "company", "tracker", "flows", "bytes", "ips"} <= set(
+            data["rows"][0]
+        )
+        with report.with_suffix(".csv").open(newline="", encoding="utf-8") as f:
+            table = list(csv.DictReader(f))
+        assert len(table) == len(data["rows"])
+        assert any(row["tracker"] == "True" for row in table)
+        await pilot.press("o")
+        await pilot.pause()
+        assert opened == [report.with_suffix(".csv")]
+
+
+def test_report_neutralizes_spreadsheet_formulas(tmp_path):
+    from lazyios.privacy import HostRow, write_report
+
+    row = HostRow("=cmd|' /c calc'!A1", "-evil.example", bytes=5, first=1.0, last=2.0)
+    _, csv_path = write_report([row], tmp_path)
+    line = csv_path.read_text(encoding="utf-8").splitlines()[1]
+    assert line.startswith("'=cmd") and ",'-evil.example," in line
+
+
+async def test_privacy_renders_hostile_names_literally(tmp_path):
+    from lazyios.backend import Packet
+    from lazyios.fake import _dns_response
+
+    app, _ = make(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        tab = app.query_one(PrivacyTab)
+        dns = _dns_response("[red]evil.example.com", "203.0.113.5")
+        for p in (
+            Packet(
+                1.0, 70, "mDNSResponder", "en0", "udp", "192.168.0.1:53", "192.168.0.204:5", 90, dns
+            ),
+            Packet(
+                1.0,
+                9,
+                "[bold]App\x1b[31m",
+                "en0",
+                "tcp",
+                "192.168.0.204:5",
+                "203.0.113.5:443",
+                90,
+            ),
+        ):
+            app.aggregator.feed(p)
+        await pilot.press("7")
+        tab.refresh_view(force=True)
+        await pilot.pause()
+        rows = privacy_rows(tab)
+        assert ("[bold]App[31m", "203.0.113.5") in {row[:2] for row in rows}
+        assert all("evil" not in cell for row in rows for cell in row)
+        table = tab.query_one("#table", DataTable)
+        assert all(isinstance(c, Text) for i in range(table.row_count) for c in table.get_row_at(i))
+
+
+async def test_capture_is_shared_between_tabs(tmp_path):
+    app, backend = make(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        network = app.query_one(NetworkTab)
+        await pilot.press("5", "space")
+        await until(pilot, lambda: network.count > 5)
+        assert app.capturing and network.capturing and "capture on" in text_of(app, "#status")
+        await pilot.press("7")
+        await until(pilot, lambda: app.aggregator.rows())
+        await pilot.press("space")  # stop from the other tab
+        await until(pilot, lambda: not app.capturing)
+        assert backend.captures == 1
+        assert network.count == network.query_one("#packets", DataTable).row_count
+        before = len(app.aggregator.rows())
+        await pilot.press("space")  # a new capture starts clean
+        await pilot.pause(0.1)
+        assert backend.captures == 2 and len(app.aggregator.rows()) <= before
+        await pilot.press("space")
+        await until(pilot, lambda: not app.capturing)
