@@ -1,0 +1,66 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "lazyios"
+version = "0.1.0"
+description = "Terminal UI to control your iPhone from Windows, macOS and Linux: syslog, processes, apps, packet capture, network conditions. No jailbreak, no Xcode."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
+authors = [{ name = "Manuel Sánchez" }]
+keywords = [
+    "iphone", "ios", "tui", "terminal", "textual", "pymobiledevice3", "usbmuxd", "syslog",
+    "pcap", "wireshark", "packet-capture", "network-conditioner", "developer-mode",
+    "ios-debugging", "ios-17", "lazygit", "libimobiledevice", "idevicesyslog",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Debuggers",
+    "Topic :: System :: Networking :: Monitoring",
+]
+dependencies = [
+    "textual>=8.2",
+    "pymobiledevice3>=11.36",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9",
+    "pytest-asyncio>=1.0",
+    "ruff>=0.15",
+]
+
+[project.scripts]
+lazyios = "lazyios.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/Manuel-1312/lazyios"
+Repository = "https://github.com/Manuel-1312/lazyios"
+Issues = "https://github.com/Manuel-1312/lazyios/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/lazyios"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]

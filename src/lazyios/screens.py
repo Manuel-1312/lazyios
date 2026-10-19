@@ -1,0 +1,84 @@
+"""Modal screens: confirm, prompt, help."""
+
+from __future__ import annotations
+
+from textual.app import ComposeResult
+from textual.binding import Binding
+from textual.containers import Horizontal, Vertical
+from textual.screen import ModalScreen
+from textual.widgets import Button, Input, Static
+
+from .art import header
+
+HELP = """\
+ global
+   1-6        switch tab
+   q          quit (clears condition and location)
+   ?          this help
+   /          focus the filter, esc to leave it
+   r          refresh
+
+ logs        p pause/resume   c clear
+ processes   k kill   l launch by bundle id
+ apps        enter launch
+ network     space start/stop capture   o open capture
+             enter apply condition      x clear condition
+ tools       s screenshot   o open it   l coordinates
+             enter set location   x clear location   f fps
+"""
+
+
+class Confirm(ModalScreen[bool]):
+    BINDINGS = [
+        Binding("y", "answer(True)", "yes"),
+        Binding("n,escape", "answer(False)", "no"),
+    ]
+
+    def __init__(self, question: str) -> None:
+        super().__init__()
+        self.question = question
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            yield Static(self.question, classes="dialog-title")
+            with Horizontal(classes="dialog-buttons"):
+                yield Button("no", id="no")
+                yield Button("yes", id="yes", variant="error")
+
+    def on_mount(self) -> None:
+        self.query_one("#no", Button).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(event.button.id == "yes")
+
+    def action_answer(self, value: bool) -> None:
+        self.dismiss(value)
+
+
+class Prompt(ModalScreen[str | None]):
+    BINDINGS = [Binding("escape", "cancel", "cancel")]
+
+    def __init__(self, title: str, placeholder: str = "") -> None:
+        super().__init__()
+        self.title_text = title
+        self.placeholder = placeholder
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            yield Static(self.title_text, classes="dialog-title")
+            yield Input(placeholder=self.placeholder)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        self.dismiss(event.value.strip() or None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+class Help(ModalScreen[None]):
+    BINDINGS = [Binding("escape,question_mark,q", "dismiss", "close")]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            yield Static(header("keys"), classes="dialog-title")
+            yield Static(HELP)

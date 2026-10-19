@@ -1,0 +1,305 @@
+"""Backend with canned data for --demo, screenshots and tests."""
+
+from __future__ import annotations
+
+import asyncio
+import base64
+import random
+import struct
+import time
+from collections.abc import AsyncIterator, Callable
+from pathlib import Path
+
+from .backend import (
+    App,
+    BackendError,
+    Battery,
+    Condition,
+    DeviceInfo,
+    DevModeOffError,
+    NoDeviceError,
+    Packet,
+    Process,
+    undo_all,
+)
+
+# 1x1 PNG, enough for the tools tab to have something to save
+_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+)
+
+# process, image, pid, messages
+_DAEMONS = [
+    (
+        "SpringBoard",
+        "SpringBoard",
+        64,
+        ["icon list updated", "scene 0x5f1 activated", "dock layout committed"],
+    ),
+    (
+        "locationd",
+        "CoreLocation",
+        81,
+        ["fix accuracy 65.0", "client registered", "wifi scan requested"],
+    ),
+    ("apsd", "libxpc.dylib", 122, ["keepalive ok", "token refreshed", "connection established"]),
+    ("Safari", "WebKit", 912, ["page load finished", "network process ready", "cache trimmed"]),
+    (
+        "mediaserverd",
+        "MediaToolbox",
+        77,
+        ["audio route changed", "session activated", "volume 0.50"],
+    ),
+    ("backboardd", "CoreBrightness", 63, ["ALS lux=312", "brightness 0.62", "display on"]),
+    (
+        "mDNSResponder",
+        "mDNSResponder",
+        70,
+        ["query for apple.com", "cache hit", "interface en0 up"],
+    ),
+    ("symptomsd", "SymptomEvaluator", 98, ["wifi quality ok", "flow stats updated"]),
+    ("CommCenter", "CoreTelephony", 88, ["signal bars 4", "registered on network"]),
+    ("powerd", "powerd", 55, ["battery 64%", "assertion released", "charger attached"]),
+    ("trustd", "Security", 101, ["ocsp cache refreshed", "trust eval ok"]),
+    ("cloudd", "CloudKit", 140, ["sync started", "zone fetch complete"]),
+]
+_BAD = [
+    ("Safari", "WebKit", 912, "error", "web content process terminated"),
+    ("cloudd", "CloudKit", 140, "error", "request failed: timed out"),
+    ("kernel", "Sandbox", 0, "fault", "deny file-read-data /private/var/db"),
+]
+_LEVELS = ("debug", "info", "notice")
+
+
+def _log_line(rng: random.Random, when: float) -> str:
+    stamp = time.strftime("%b %d %H:%M:%S", time.localtime(when))
+    if rng.random() < 0.03:
+        proc, image, pid, level, msg = rng.choice(_BAD)
+    else:
+        proc, image, pid, msgs = rng.choice(_DAEMONS)
+        level, msg = rng.choices(_LEVELS, (3, 4, 4))[0], rng.choice(msgs)
+    return f"{stamp} iPhone-demo {proc}({image})[{pid}] <{level.capitalize()}>: {msg}"
+
+
+_PROCS = [
+    ("launchd", 1, False),
+    ("SpringBoard", 64, True),
+    ("backboardd", 63, False),
+    ("locationd", 81, False),
+    ("mediaserverd", 77, False),
+    ("apsd", 122, False),
+    ("Safari", 912, True),
+    ("Preferences", 1021, True),
+    ("Maps", 1033, True),
+    ("sharingd", 140, False),
+]
+
+_APPS = [
+    App("Maps", "com.example.maps", "3.2.1"),
+    App("Notes", "com.example.notes", "1.9"),
+    App("Terminal", "com.example.terminal", "2.0.4"),
+    App("Weather", "com.example.weather", "7.1"),
+]
+
+_CONDITIONS = [
+    Condition("SlowNetworkCondition", "network", "SlowNetwork3G", "3G network", "1 Mbps, 100 ms"),
+    Condition("SlowNetworkCondition", "network", "SlowNetworkEdge", "edge network", "0.2 Mbps"),
+    Condition(
+        "SlowNetworkCondition", "network", "SlowNetwork100PctLoss", "100% loss", "no traffic"
+    ),
+    Condition("ThermalCondition", "thermal", "ThermalSerious", "thermal serious", "serious"),
+    Condition("ThermalCondition", "thermal", "ThermalCritical", "thermal critical", "critical"),
+]
+
+
+def _ipv4(proto: int, src: bytes, dst: bytes, sport: int, dport: int, payload: int) -> bytes:
+    l4 = struct.pack("!HHIIBBHHH", sport, dport, 0, 0, 0x50, 0x10, 1024, 0, 0)
+    if proto == 17:
+        l4 = struct.pack("!HHHH", sport, dport, 8 + payload, 0)
+    body = l4 + bytes(payload)
+    head = struct.pack("!BBHHHBBH4s4s", 0x45, 0, 20 + len(body), 0, 0, 64, proto, 0, src, dst)
+    return head + body
+
+
+# process, pid, proto, dst ip, dst port
+_FLOWS = [
+    ("apsd", 122, "tcp", "17.188.164.12", 5223),
+    ("Safari", 912, "tcp", "142.250.178.142", 443),
+    ("Safari", 912, "tcp", "151.101.1.69", 443),
+    ("Maps", 1033, "tcp", "17.253.144.10", 443),
+    ("cloudd", 140, "tcp", "17.138.175.250", 443),
+    ("mDNSResponder", 70, "udp", "192.168.0.1", 53),
+    ("mDNSResponder", 70, "udp", "192.168.0.1", 53),
+    ("", 0xFFFFFFFF, "udp", "192.168.0.255", 57621),
+]
+
+
+def _pcap_header() -> bytes:
+    return struct.pack("<IHHiIII", 0xA1B2C3D4, 2, 4, 0, 0, 65535, 101)
+
+
+class FakeBackend:
+    def __init__(
+        self,
+        *,
+        has_device: bool = True,
+        developer: bool = True,
+        problem: BackendError | None = None,
+        interval: float = 0.05,
+    ) -> None:
+        self.has_device = has_device
+        self.developer = developer
+        self.problem = problem
+        self.interval = interval
+        self.tunnel_open = False
+        self.active_condition: Condition | None = None
+        self.location: tuple[float, float] | None = None
+        self.killed: list[int] = []
+        self.launched: list[str] = []
+        self.cleared_conditions = 0
+        self.cleared_locations = 0
+        self.closed = False
+        self.on_reset: Callable[[], None] | None = None
+        self.clear_failures = 0
+        self.condition_clear_hangs = False
+        self.close_timeout = 5.0
+        self._cond_dirty = self._loc_dirty = False
+        self._battery = 64
+
+    def _need_device(self) -> None:
+        if self.problem is not None:
+            raise self.problem
+        if not self.has_device:
+            raise NoDeviceError("no device connected")
+
+    async def device_info(self) -> DeviceInfo:
+        self._need_device()
+        return DeviceInfo(
+            "iPhone", "iPhone18,1", "27.2", "24B5089g", "DEMO00000000", "02:00:00:aa:bb:cc",
+            "00000000-DEMO000000000000",
+        )  # fmt: skip
+
+    async def battery(self) -> Battery:
+        self._need_device()
+        return Battery(self._battery, 248, True, 20, "pd charger")
+
+    async def developer_mode(self) -> bool:
+        self._need_device()
+        return self.developer
+
+    async def syslog(self) -> AsyncIterator[str]:
+        self._need_device()
+        rng = random.Random(11)
+        when = time.time()
+        while True:
+            await asyncio.sleep(self.interval)
+            when += rng.random() * 0.8
+            yield _log_line(rng, when)
+
+    async def open_tunnel(self) -> None:
+        self._need_device()
+        if not self.developer:
+            raise DevModeOffError("developer mode is off")
+        await asyncio.sleep(self.interval)
+        self.tunnel_open = True
+
+    async def processes(self) -> list[Process]:
+        await self.open_tunnel()
+        return [Process(pid, name, app, "10-19 08:12:00") for name, pid, app in _PROCS]
+
+    async def kill(self, pid: int) -> None:
+        await self.open_tunnel()
+        self.killed.append(pid)
+
+    async def launch(self, bundle_id: str) -> int:
+        await self.open_tunnel()
+        self.launched.append(bundle_id)
+        return 4242
+
+    async def apps(self) -> list[App]:
+        self._need_device()
+        return list(_APPS)
+
+    async def capture(self, path: Path) -> AsyncIterator[Packet]:
+        self._need_device()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        rng = random.Random(7)
+        with path.open("wb") as out:
+            out.write(_pcap_header())
+            while True:
+                await asyncio.sleep(self.interval)
+                proc, pid, proto, host, dport = rng.choice(_FLOWS)
+                sport = rng.randint(49152, 65535)
+                raw = _ipv4(
+                    6 if proto == "tcp" else 17,
+                    bytes([192, 168, 0, 204]),
+                    bytes(map(int, host.split("."))),
+                    sport,
+                    dport,
+                    rng.choice((0, 0, 32, 120, 517, 1200, 1400)),
+                )
+                now = time.time()
+                out.write(struct.pack("<IIII", int(now), int(now % 1 * 1e6), len(raw), len(raw)))
+                out.write(raw)
+                out.flush()
+                src, dst = f"192.168.0.204:{sport}", f"{host}:{dport}"
+                yield Packet(now, pid, proc, "en0", proto, src, dst, len(raw) + 14)
+
+    async def conditions(self) -> list[Condition]:
+        await self.open_tunnel()
+        return list(_CONDITIONS)
+
+    async def set_condition(self, condition: Condition) -> None:
+        await self.open_tunnel()
+        self._cond_dirty = True
+        self.active_condition = condition
+
+    async def clear_condition(self) -> None:
+        await asyncio.shield(self._clear_condition())
+
+    async def _clear_condition(self) -> None:
+        if not self._cond_dirty:
+            return
+        if self.condition_clear_hangs:
+            await asyncio.sleep(3600)
+        await self._clear_step()
+        self.cleared_conditions += 1
+        self.active_condition = None
+        self._cond_dirty = False
+
+    async def _clear_step(self) -> None:
+        await asyncio.sleep(self.interval)
+        if self.clear_failures:
+            self.clear_failures -= 1
+            raise BackendError("clear failed")
+
+    async def screenshot(self) -> bytes:
+        await self.open_tunnel()
+        return _PNG
+
+    async def set_location(self, lat: float, lon: float) -> None:
+        await self.open_tunnel()
+        self._loc_dirty = True
+        self.location = (lat, lon)
+
+    async def clear_location(self) -> None:
+        await asyncio.shield(self._clear_location())
+
+    async def _clear_location(self) -> None:
+        if not self._loc_dirty:
+            return
+        await self._clear_step()
+        self.cleared_locations += 1
+        self.location = None
+        self._loc_dirty = False
+
+    async def fps(self) -> AsyncIterator[int]:
+        await self.open_tunnel()
+        rng = random.Random(3)
+        while True:
+            await asyncio.sleep(self.interval)
+            yield rng.choice((60, 60, 59, 58, 120, 117, 61))
+
+    async def close(self) -> None:
+        self.closed = True
+        await undo_all(self._clear_condition, self._clear_location, timeout=self.close_timeout)
