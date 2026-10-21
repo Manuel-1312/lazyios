@@ -777,7 +777,8 @@ async def test_timeline_follows_syslog_errors_and_processes(tmp_path, monkeypatc
         await until(pilot, lambda: maps("exited") and maps("started"))  # demo Maps comes and goes
         await pilot.press("p")
         await until(pilot, lambda: not app.watching_processes)
-        assert app.timeline.events()[-1].summary == "watch stopped"
+        # syslog keeps flowing, so "watch stopped" need not be the newest event
+        assert any(e.summary == "watch stopped" for e in app.timeline.events())
 
 
 async def test_conditions_and_errors_reach_the_timeline(tmp_path):
