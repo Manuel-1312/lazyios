@@ -276,7 +276,7 @@ class DeviceBackend:
         async with self._dvt_guard("launch"), ProcessControl(await self._provider()) as control:
             try:
                 return await asyncio.wait_for(control.launch(bundle_id=bundle_id), LAUNCH_TIMEOUT)
-            except TimeoutError:
+            except asyncio.TimeoutError:  # not the builtin TimeoutError before 3.11
                 raise BackendError("launch timed out: is the device unlocked?") from None
 
     async def apps(self) -> list[App]:

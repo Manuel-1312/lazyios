@@ -19,9 +19,11 @@ SIZE = (120, 40)
 
 
 async def until(pilot, check: Callable[[], bool], timeout: float = 5.0) -> None:
-    async with asyncio.timeout(timeout):
-        while not check():
-            await pilot.pause(0.02)
+    deadline = asyncio.get_running_loop().time() + timeout
+    while not check():
+        if asyncio.get_running_loop().time() > deadline:
+            raise TimeoutError
+        await pilot.pause(0.02)
 
 
 def make(tmp_path: Path, **kwargs) -> tuple[LazyiosApp, FakeBackend]:
