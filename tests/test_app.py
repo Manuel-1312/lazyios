@@ -27,6 +27,13 @@ async def until(pilot, check: Callable[[], bool], timeout: float = 5.0) -> None:
         await pilot.pause(0.02)
 
 
+async def type_filter(pilot, text: str, *after: str) -> None:
+    """/ then the text, once the filter has focus: before that its letters are tab shortcuts."""
+    await pilot.press("slash")
+    await until(pilot, lambda: pilot.app.focused is not None and pilot.app.focused.id == "filter")
+    await pilot.press(*text, *after)
+
+
 def make(tmp_path: Path, **kwargs) -> tuple[LazyiosApp, FakeBackend]:
     backend = FakeBackend(interval=0.01, **kwargs)
     switch = lambda udid: FakeBackend(udid, interval=0.01)  # noqa: E731
@@ -79,8 +86,7 @@ async def test_logs_arrive_and_filter_narrows(tmp_path):
         await until(pilot, lambda: len(logs.buffer) > 20)
         log = logs.query_one(RichLog)
         await until(pilot, lambda: len(log.lines) > 5)
-        await pilot.press("slash")
-        await pilot.press(*"safari")
+        await type_filter(pilot, "safari")
         await pilot.pause(0.5)  # filter is debounced
         assert log.lines
         assert all("Safari" in line.text for line in log.lines)
@@ -157,7 +163,10 @@ async def test_location_is_cleared_on_quit(tmp_path):
     async with app.run_test(size=SIZE) as pilot:
         await pilot.press("6")
         await pilot.pause()
-        await pilot.press("l", *"40.7", "enter", *"-74", "enter")
+        await pilot.press("l")
+        # until the field has focus, "4" is still the switch-to-tab-4 key
+        await until(pilot, lambda: app.focused is not None and app.focused.id == "lat")
+        await pilot.press(*"40.7", "enter", *"-74", "enter")
         await until(pilot, lambda: backend.location is not None)
         assert backend.location == (40.7, -74.0)
         await pilot.press("q")
@@ -437,7 +446,7 @@ async def test_privacy_filter_narrows(tmp_path):
     async with app.run_test(size=SIZE) as pilot:
         tab = await start_privacy(pilot, app, rows=20)
         total = tab.query_one("#table", DataTable).row_count
-        await pilot.press("slash", *"quick")
+        await type_filter(pilot, "quick")
         await pilot.pause()
         shown = privacy_rows(tab)
         assert 0 < len(shown) < total
@@ -622,7 +631,7 @@ async def test_conns_tab_follows_the_capture_and_filters(tmp_path):
         assert any(f.new for f in app.flows.rows())
         await pilot.press("space")
         await until(pilot, lambda: not app.capturing)
-        await pilot.press("slash", *"proto:udp", "enter")
+        await type_filter(pilot, "proto:udp", "enter")
         await pilot.pause(0.2)
         shown = [f for f in tab.items if tab.matches(f, "proto:udp")]
         assert 0 < table.row_count == len(shown) < len(tab.items)
@@ -751,7 +760,7 @@ async def test_timeline_collects_device_capture_and_contacts(tmp_path):
         assert {"device", "capture", "connection", "network"} <= kinds
         assert any(e.summary.startswith("first contact:") and e.app for e in app.timeline.events())
         assert tab.items == sorted(tab.items, key=lambda e: (e.time, e.seq), reverse=True)
-        await pilot.press("slash", *"kind:capture", "enter")
+        await type_filter(pilot, "kind:capture", "enter")
         table = tab.query_one("#table", DataTable)
         assert sum(e.kind == "capture" for e in app.timeline.events()) == 2
         await until(pilot, lambda: table.row_count == 2)  # the table refreshes once a second
