@@ -57,14 +57,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def make_backend(args: argparse.Namespace) -> Backend:
+def make_backend(args: argparse.Namespace, udid: str | None = None) -> Backend:
+    """The backend for one device; udid overrides --udid (switching devices in the app)."""
     if args.demo:
         from .fake import FakeBackend
 
-        return FakeBackend()
+        return FakeBackend(udid)
     from .device import DeviceBackend
 
-    return DeviceBackend(args.udid)
+    return DeviceBackend(udid or args.udid)
 
 
 async def _selftest() -> None:
@@ -101,7 +102,13 @@ def main(argv: Sequence[str] | None = None) -> None:
     backend = make_backend(args)
     try:
         with contextlib.suppress(KeyboardInterrupt):
-            LazyiosApp(backend, args.out, args.max_capture_mb * MB, args.keep_sessions).run()
+            LazyiosApp(
+                backend,
+                args.out,
+                args.max_capture_mb * MB,
+                args.keep_sessions,
+                make_backend=lambda udid: make_backend(args, udid),
+            ).run()
     finally:
         if not backend.closed:  # the app's own shutdown did not run
             with contextlib.suppress(Exception):

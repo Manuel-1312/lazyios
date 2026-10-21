@@ -93,6 +93,11 @@ class PrivacyTab(ReportOpener, TableTab[HostRow]):
     async def load(self) -> None:
         self.refresh_view(force=True)
 
+    def reset_device(self) -> None:
+        super().reset_device()
+        self._seen = -1
+        self.last_report = None
+
     def key(self, item: HostRow) -> str:
         return f"{item.process}\x00{item.domain}"
 
@@ -187,7 +192,7 @@ class PrivacyTab(ReportOpener, TableTab[HostRow]):
             self.app.notify("nothing to export yet", severity="warning")
             return
         try:
-            json_path, csv_path = write_report(rows, self.lazy.out_dir / "reports")
+            json_path, csv_path = write_report(rows, self.lazy.device_dir / "reports")
         except OSError as e:
             self.app.notify(f"cannot write report: {e}", severity="error", markup=False)
             return

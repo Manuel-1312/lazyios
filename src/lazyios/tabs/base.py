@@ -45,6 +45,10 @@ class TabBody(Vertical):
     async def load(self) -> None:
         """Fetch the initial data."""
 
+    def reset_device(self) -> None:
+        """Another device was picked: forget what was shown, load again on next activation."""
+        self._loaded = False
+
     def notice(self, message: str) -> None:
         widget = self.query_one(".notice", Static)
         widget.update(Text(message, style=f"bold {RED}") if message else "")
@@ -102,6 +106,10 @@ class TableTab(TabBody, Generic[T]):
             return None
         row_key = table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value
         return next((i for i in self.items if self.key(i) == row_key), None)
+
+    def reset_device(self) -> None:
+        super().reset_device()
+        self.set_items([])
 
     def set_items(self, items: list[T]) -> None:
         self.items = items

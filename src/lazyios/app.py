@@ -4,7 +4,7 @@ import asyncio
 import json
 import time
 from collections import deque
-from collections.abc import Coroutine
+from collections.abc import Callable, Coroutine
 from contextlib import aclosing, suppress
 from datetime import datetime
 from pathlib import Path
@@ -28,7 +28,7 @@ from .backend import (
 from .flows import FlowTable
 from .parsing import clean_text
 from .privacy import KERNEL_PID, HostAggregator
-from .screens import Help
+from .screens import DevicePicker, Help
 from .status import status_line
 from .tabs.apps import AppsTab
 from .tabs.base import TabBody
@@ -72,7 +72,15 @@ PCAP_HEADER, PCAP_RECORD = 256, 48
 ALERT_CHECK = 1.0
 PROCESS_POLL = 5.0  # seconds between process lists while the timeline watches them
 MAX_ALERTS = 200
+DEVICE_POLL = 5.0  # seconds between looks at which devices are plugged in
+WORKER_STOP = 5.0
 DEV_OFF = "developer mode is off: enable it in settings > privacy & security"
+
+
+def device_folder(udid: str) -> str:
+    """Folder name for one device's files: its UDID, reduced to letters, digits and dashes."""
+    safe = "".join(c for c in udid if c.isascii() and (c.isalnum() or c == "-"))[:64]
+    return safe or "unknown-device"
 
 
 class LazyiosApp(App[None]):
@@ -83,6 +91,7 @@ class LazyiosApp(App[None]):
         Binding("q", "quit", "quit"),
         Binding("ctrl+c", "quit", "quit", show=False, priority=True),
         Binding("question_mark", "help", "help"),
+        Binding("d", "devices", "devices"),
         *(
             Binding(str(n % 10), f"tab({n})", name, show=False)
             for n, (name, _) in enumerate(TABS, 1)
@@ -95,9 +104,13 @@ class LazyiosApp(App[None]):
         out_dir: Path,
         max_capture: int = MAX_CAPTURE_MB * MB,
         keep_sessions: int = sessions.KEEP,
+        make_backend: Callable[[str], Backend] | None = None,
     ) -> None:
         super().__init__()
         self.backend = backend
+        self.make_backend = make_backend  # a backend for another device, to switch to it
+        self.known_devices: set[str] | None = None  # UDIDs usbmuxd listed last time
+        self.last_udid: str | None = None  # the device this app last talked to
         self.out_dir = out_dir
         self.max_capture = max_capture  # bytes on disk, a capture stops past it
         self.keep_sessions = keep_sessions  # 0: never write session history
@@ -141,7 +154,7 @@ class LazyiosApp(App[None]):
         self.run_task(self.refresh_device(), group="refresh")
         self.set_interval(BATTERY_REFRESH, self.tick)
         self.set_interval(ALERT_CHECK, self.check_new_rows)
-        self.sessions = sessions.load(self.out_dir / "sessions")
+        self.set_interval(DEVICE_POLL, self.poll_devices)
         self.rules, problem = alerts.load(self.out_dir)
         self.thresholds, trouble = anomaly.load(self.out_dir)
         for title, text in (("alerts", problem), ("anomaly", trouble)):
@@ -195,12 +208,20 @@ class LazyiosApp(App[None]):
                 self.report(e)
             if had is not None:
                 self.timeline.add("device", f"lost: {e}", app=had.product_type)
+        if self.info is not None and self.info.udid != self.last_udid:
+            self.last_udid = self.info.udid
+            self.sessions = sessions.load(self.device_dir / "sessions")
         if had is None and self.info is not None:
             i = self.info
             self.timeline.add("device", f"connected: ios {i.version} ({i.build})",
                               app=i.product_type, detail=f"{i.name}")  # fmt: skip
         self.update_status()
         self.query_one(OverviewTab).render_view()
+
+    @property
+    def device_dir(self) -> Path:
+        """Where this device's captures, screenshots, reports and sessions go."""
+        return self.out_dir / device_folder(self.info.udid if self.info else self.last_udid or "")
 
     def update_status(self) -> None:
         self.query_one("#status", Static).update(
@@ -220,7 +241,7 @@ class LazyiosApp(App[None]):
             self._capture_worker.cancel()
             return
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")[:-3]
-        self.last_capture = self.out_dir / "captures" / f"capture-{stamp}.pcap"
+        self.last_capture = self.device_dir / "captures" / f"capture-{stamp}.pcap"
         self.capturing = True
         self.pending = []
         self.aggregator.reset()
@@ -285,7 +306,7 @@ class LazyiosApp(App[None]):
         udid = self.info.udid if self.info else ""
         data = sessions.snapshot(rows, self.versions, udid, datetime.now())
         try:
-            sessions.save(self.out_dir / "sessions", data, self.keep_sessions)
+            sessions.save(self.device_dir / "sessions", data, self.keep_sessions)
         except OSError as e:
             self.notify(f"cannot save session history: {e}", severity="error", markup=False)
             return
@@ -352,6 +373,74 @@ class LazyiosApp(App[None]):
             self.watching_processes = False
             self.timeline.add("process", "watch stopped", source="dvt")
 
+    def poll_devices(self) -> None:
+        self.run_task(self._poll_devices(), group="devices")
+
+    async def _poll_devices(self) -> None:
+        """Note plugs and unplugs; when this app's device comes back, reconnect right away."""
+        try:
+            found = set(await self.backend.device_ids())
+        except BackendError:
+            return  # refresh_device explains usbmuxd problems
+        before, self.known_devices = self.known_devices, found
+        if before is None:
+            return
+        current = self.info.udid if self.info else self.last_udid
+        for udid in sorted(found - before):
+            self.timeline.add("device", f"plugged in: {udid}")
+            if udid != current:
+                self.notify(f"device plugged in: {udid}  (d to switch)", markup=False)
+        for udid in sorted(before - found):
+            self.timeline.add("device", f"unplugged: {udid}")
+        if self.info is None and current in found - before:
+            await self.refresh_device()
+
+    def action_devices(self) -> None:
+        self.run_task(self._pick_device(), group="devices-pick")
+
+    async def _pick_device(self) -> None:
+        found = await self.backend.devices()
+        current = self.info.udid if self.info else None
+
+        def chosen(udid: str | None) -> None:
+            if udid and udid != current:
+                self.run_task(self.switch_device(udid), group="switch")
+
+        self.push_screen(DevicePicker(found, current), chosen)
+
+    async def switch_device(self, udid: str) -> None:
+        """Close this device (undoing conditions and location, saving its session) and start a
+        clean session on another one. Nothing from one device's session carries over."""
+        if self.make_backend is None:
+            self.notify("switching devices is not available here", severity="warning")
+            return
+        others = [w for w in self.workers if w.group != "switch"]
+        for worker in others:
+            worker.cancel()
+        for worker in others:
+            with suppress(Exception):
+                await asyncio.wait_for(worker.wait(), WORKER_STOP)
+        with suppress(Exception):
+            await asyncio.wait_for(self.backend.close(), SHUTDOWN_TIMEOUT)
+        self.backend = self.make_backend(udid)
+        self.backend.on_reset = self._on_reset
+        self.info = self.battery = self.dev_mode = self.problem = None
+        self.tunnel, self.capturing, self.watching_processes = "off", False, False
+        self.last_capture, self.pending, self.known_devices = None, [], None
+        self.aggregator.reset()
+        self.flows.reset()
+        self.alerts.clear()
+        self.sessions, self.baseline, self.history, self.versions = [], [], {}, {}
+        self.timeline = Timeline()
+        for body in self.query(TabBody):
+            body.reset_device()
+        self.update_status()
+        await self.refresh_device(verbose=True)
+        self.timeline.add("device", f"switched to {udid}")
+        if (pane := self.query_one(TabbedContent).active_pane) is not None:
+            for body in pane.query(TabBody):
+                body.activate()
+
     async def open_dvt(self) -> str | None:
         """Open the tunnel if needed; returns a message when developer services are unavailable."""
         if self.dev_mode is False:
@@ -381,7 +470,8 @@ class LazyiosApp(App[None]):
         self.notify(f"launched {bundle_id} (pid {pid})", markup=False)
 
     def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
-        event.pane.query_one(TabBody).activate()
+        for body in event.pane.query(TabBody):  # none while the app is shutting down
+            body.activate()
 
     def action_tab(self, number: int) -> None:
         self.query_one(TabbedContent).active = TABS[number - 1][0]

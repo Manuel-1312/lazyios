@@ -14,14 +14,18 @@ from pathlib import Path
 
 from .backend import (
     App,
+    AuditFacts,
     BackendError,
     Battery,
     Condition,
     DeviceInfo,
+    DeviceSummary,
     DevModeOffError,
     NoDeviceError,
     Packet,
     Process,
+    ProcSample,
+    SysSample,
     undo_all,
 )
 from .files import create_private
@@ -232,15 +236,23 @@ def _pcap_header() -> bytes:
     return struct.pack("<IHHiIII", 0xA1B2C3D4, 2, 4, 0, 0, 65535, 101)
 
 
+DEMO_DEVICES = (
+    DeviceSummary("00000000-DEMO000000000000", "USB", "iPhone", "iPhone18,1", "27.2"),
+    DeviceSummary("00000000-DEMO000000000001", "USB", "iPad", "iPad16,3", "27.1"),
+)
+
+
 class FakeBackend:
     def __init__(
         self,
+        udid: str | None = None,
         *,
         has_device: bool = True,
         developer: bool = True,
         problem: BackendError | None = None,
         interval: float = 0.05,
     ) -> None:
+        self.udid = udid or DEMO_DEVICES[0].udid
         self.has_device = has_device
         self.developer = developer
         self.problem = problem
@@ -270,14 +282,15 @@ class FakeBackend:
 
     async def device_info(self) -> DeviceInfo:
         self._need_device()
+        me = next((d for d in DEMO_DEVICES if d.udid == self.udid), DEMO_DEVICES[0])
         return DeviceInfo(
-            "iPhone", "iPhone18,1", "27.2", "24B5089g", "DEMO00000000", "02:00:00:aa:bb:cc",
-            "00000000-DEMO000000000000",
+            me.name, me.product_type, me.version, "24B5089g", "DEMO00000000", "02:00:00:aa:bb:cc",
+            self.udid,
         )  # fmt: skip
 
     async def battery(self) -> Battery:
         self._need_device()
-        return Battery(self._battery, 248, True, 20, "pd charger")
+        return Battery(self._battery, 248, True, 20, "pd charger", 3870, 450, 3945, 3862)
 
     async def developer_mode(self) -> bool:
         self._need_device()
@@ -436,6 +449,36 @@ class FakeBackend:
         while True:
             await asyncio.sleep(self.interval)
             yield rng.choice((60, 60, 59, 58, 120, 117, 61))
+
+    async def sysmon(self) -> AsyncIterator[SysSample]:
+        await self.open_tunnel()
+        rng = random.Random(5)
+        first = True
+        while True:
+            await asyncio.sleep(self.interval)
+            procs = tuple(
+                ProcSample(pid, name, None if first else round(rng.random() * 30, 1),
+                           rng.randint(2, 300) * 1024 * 1024)
+                for name, pid, _ in _PROCS
+            )  # fmt: skip
+            cpu = None if first else round(rng.random() * 40, 1)
+            yield SysSample(time.time(), 6, cpu, 0.6 + rng.random() * 0.3, procs)
+            first = False
+
+    async def device_ids(self) -> list[str]:
+        return [d.udid for d in DEMO_DEVICES] if self.has_device else []
+
+    async def devices(self) -> list[DeviceSummary]:
+        return list(DEMO_DEVICES) if self.has_device else []
+
+    async def audit_facts(self) -> AuditFacts:
+        self._need_device()
+        return AuditFacts(
+            "27.2", "24B5089g", developer_mode=self.developer, passcode=True,
+            activation="Activated", wifi_debugging=False, wifi_connections=None,
+            backup_encrypted=False, cloud_backup=True, supervised=False,
+            profiles=(("com.example.vpn", "Example VPN", "Example Corp"),),
+        )  # fmt: skip
 
     async def close(self) -> None:
         self.closed = True

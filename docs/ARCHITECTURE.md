@@ -15,6 +15,7 @@ sessions.py   local history of app -> domains per capture, compared with the nex
 alerts.py     alert rules from <out>/alerts.json (validated, defaults on any error)
 timeline.py   bounded event list, syslog folding, process start/exit diff, time queries
 anomaly.py    spike, beacon, fanout and change rules with <out>/anomaly.json thresholds
+audit.py      security checks from AuditFacts: evidence, why, action; never a verdict
 files.py      owner-only output files, JSON/CSV reports with a SHA-256 file
 app.py        Textual app: status line, workers, the one shared capture
 tabs/         one widget per tab; TableTab gives filter + refresh to list tabs
@@ -59,13 +60,20 @@ not in this table is not promised.
 | --- | --- | --- | --- |
 | packets with pid + process name | `PcapdService` (lockdown) | no | yes |
 | connections, rx/tx bytes, RTT | DVT `NetworkMonitor` | yes | yes, but **pid is -2 for every connection**, bytes are per-second deltas: no app attribution, so the inspector uses pcapd |
-| per-process CPU, memory (physFootprint, resident) | DVT `Sysmontap` | yes | yes (571 processes) |
+| per-process CPU, memory (physFootprint, resident) | DVT `Sysmontap` | yes | yes (571-671 processes); per-process `cpuUsage` is % of one core, `None` in the first sample |
+| system CPU and memory | DVT `Sysmontap` | yes | yes: `CPU_TotalLoad` sums all cores (divide by `CPUCount`); memory as `vmUsedCount` / `physMemSize` pages |
 | FPS | DVT `Graphics` | yes | yes (existing tools tab) |
 | battery level, cycles, charger | `DiagnosticsService.get_battery` | no | yes |
-| battery temperature | `get_battery` top level | - | **no** `Temperature` key on this build |
+| battery health, voltage, current | `get_battery` `BatteryData.DesignCapacity` / `FullChargeCapacity`, `Voltage`, `InstantAmperage` | no | yes |
+| battery temperature, thermal state | `get_battery`, `BatteryData`, IORegistry `IOPMPowerSource` / `AppleSmartBattery` | - | **no** temperature in any of them on this build |
 | syslog | `SyslogService` | no | yes |
 | app version by process name | `InstallationProxyService` `CFBundleExecutable` | no | yes (316 apps; 19 Flutter apps share `Runner`, so they get no version) |
 | process names in packets | pcapd `comm` | no | yes, cut to 16 characters |
 | process start times | DVT `proclist` `startDate` | yes | yes (641 of 642; a list takes ~1 s) |
 | syslog volume | `SyslogService` | no | ~700-840 lines/s, ~30 errors/s on an idle phone |
 | which app is in front | - | - | **not available** through these interfaces |
+| passcode set, activation | lockdown `PasswordProtected`, `ActivationState` | no | yes |
+| debugging / sync over Wi-Fi | lockdown domain `com.apple.mobile.wireless_lockdown` | no | `EnableWifiDebugging` yes; `EnableWifiConnections` absent on this build |
+| backup encryption | lockdown domain `com.apple.mobile.backup` `WillEncrypt` | no | yes |
+| configuration profiles, supervision | `MobileConfigService` `GetProfileList`, `GetCloudConfiguration` (read requests only) | no | yes |
+| connected devices | `usbmux.list_devices`, lockdown with `autopair=False` | no | yes; never triggers a Trust prompt |

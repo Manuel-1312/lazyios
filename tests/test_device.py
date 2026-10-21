@@ -52,3 +52,19 @@ async def test_no_reset_without_a_session():
     with pytest.raises(NoDeviceError):
         await backend.device_info()
     assert backend.resets == 0
+
+
+def test_device_values_are_checked_before_use():
+    from lazyios.device import _flag, _number, _proc_sample
+
+    assert _number(5) == 5 and _number(2.5) == 2.5
+    assert _number(True) is None and _number("5") is None and _number(None) is None
+    assert _flag(True) is True and _flag(0) is False and _flag(1) is True
+    assert _flag("yes") is None and _flag(2) is None
+    at = [0, 1, 2, 3]
+    assert _proc_sample([7, "Maps\x1b[2J", 12.5, 1024], at).name == "Maps[2J"
+    assert _proc_sample([7, "Maps", None, None], at).cpu is None
+    assert _proc_sample(["7", "x", 1, 1], at) is None  # pid must be an int
+    assert _proc_sample([True, "x", 1, 1], at) is None
+    assert _proc_sample([7, "x"], at) is None  # short row
+    assert _proc_sample(None, at) is None

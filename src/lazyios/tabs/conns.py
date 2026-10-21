@@ -75,6 +75,11 @@ class ConnsTab(ReportOpener, TableTab[Flow]):
     async def load(self) -> None:
         self.refresh_view(force=True)
 
+    def reset_device(self) -> None:
+        super().reset_device()
+        self._seen = -1
+        self.last_report = None
+
     def key(self, item: Flow) -> str:
         return f"{item.pid}\x00{item.proto}\x00{item.local}\x00{item.remote}"
 
@@ -177,7 +182,7 @@ class ConnsTab(ReportOpener, TableTab[Flow]):
             self.app.notify("nothing to export yet", severity="warning")
             return
         try:
-            json_path, csv_path, _ = write_flows(flows, rows, self.lazy.out_dir / "reports")
+            json_path, csv_path, _ = write_flows(flows, rows, self.lazy.device_dir / "reports")
         except OSError as e:
             self.app.notify(f"cannot write report: {e}", severity="error", markup=False)
             return

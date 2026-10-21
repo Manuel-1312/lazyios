@@ -156,6 +156,11 @@ class LogsTab(TabBody):
         self.pending = []
         self.query_one(RichLog).clear()
 
+    def reset_device(self) -> None:
+        super().reset_device()
+        self.action_clear()
+        self.notice("")
+
     def action_reconnect(self) -> None:
         self.notice("")
         self.lazy.run_task(self.load(), group=f"load-{self.id}")  # replaces the running stream

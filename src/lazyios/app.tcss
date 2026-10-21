@@ -114,12 +114,22 @@ RichLog {
     padding: 0 1;
 }
 
+#perf {
+    height: 1;
+    padding: 0 1;
+}
+
+#cpu-spark {
+    height: 2;
+    margin: 0 1;
+}
+
 #why {
     height: 3;
     padding: 0 1;
 }
 
-TextScreen {
+TextScreen, DevicePicker, AuditScreen {
     align: center middle;
     background: #000000 70%;
 }
@@ -180,6 +190,8 @@ Confirm, Prompt {
 .dialog {
     width: 62;
     height: auto;
+    max-height: 95%;
+    overflow-y: auto;
     padding: 1 2;
     border: heavy $primary;
     background: $background;
@@ -187,6 +199,21 @@ Confirm, Prompt {
 
 Confirm .dialog {
     border: heavy $error;
+}
+
+.dialog.wide {
+    width: 90%;
+    max-width: 110;
+}
+
+.dialog.wide DataTable {
+    height: auto;
+    max-height: 12;
+}
+
+.dialog-hint {
+    color: $text-muted;
+    margin-top: 1;
 }
 
 .dialog-title {

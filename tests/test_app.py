@@ -16,6 +16,7 @@ from lazyios.tabs.privacy import PrivacyTab
 from lazyios.tabs.processes import ProcessesTab
 
 SIZE = (120, 40)
+DEMO = "00000000-DEMO000000000000"  # the demo device: its files go here
 
 
 async def until(pilot, check: Callable[[], bool], timeout: float = 5.0) -> None:
@@ -28,7 +29,8 @@ async def until(pilot, check: Callable[[], bool], timeout: float = 5.0) -> None:
 
 def make(tmp_path: Path, **kwargs) -> tuple[LazyiosApp, FakeBackend]:
     backend = FakeBackend(interval=0.01, **kwargs)
-    return LazyiosApp(backend, tmp_path), backend
+    switch = lambda udid: FakeBackend(udid, interval=0.01)  # noqa: E731
+    return LazyiosApp(backend, tmp_path, make_backend=switch), backend
 
 
 def text_of(app: LazyiosApp, selector: str) -> str:
@@ -197,8 +199,8 @@ async def test_screenshot_is_saved(tmp_path):
         await pilot.press("6")
         await pilot.pause()
         await pilot.press("s")
-        await until(pilot, lambda: list((tmp_path / "screenshots").glob("*.png")))
-        assert next((tmp_path / "screenshots").glob("*.png")).read_bytes()[:4] == b"\x89PNG"
+        await until(pilot, lambda: list((tmp_path / DEMO / "screenshots").glob("*.png")))
+        assert next((tmp_path / DEMO / "screenshots").glob("*.png")).read_bytes()[:4] == b"\x89PNG"
 
 
 async def test_no_device_state(tmp_path):
@@ -300,13 +302,13 @@ def test_main_closes_backend_when_app_did_not(monkeypatch):
     backend._cond_dirty = True
 
     class Dead:
-        def __init__(self, *args):
+        def __init__(self, *args, **kwargs):
             pass
 
         def run(self):
             raise RuntimeError("terminal gone")
 
-    monkeypatch.setattr(entry, "make_backend", lambda args: backend)
+    monkeypatch.setattr(entry, "make_backend", lambda args, udid=None: backend)
     monkeypatch.setattr(entry, "LazyiosApp", Dead)
     with pytest.raises(RuntimeError):
         entry.main(["--demo"])
@@ -453,11 +455,11 @@ async def test_privacy_export_writes_json_and_csv(tmp_path, monkeypatch):
     async with app.run_test(size=SIZE) as pilot:
         await pilot.press("7", "e")
         await pilot.pause()
-        assert not (tmp_path / "reports").exists()  # nothing captured yet
+        assert not (tmp_path / DEMO / "reports").exists()  # nothing captured yet
         await start_privacy(pilot, app, rows=15)
         await pilot.press("e")
         await pilot.pause()
-        (report,) = (tmp_path / "reports").glob("*.json")
+        (report,) = (tmp_path / DEMO / "reports").glob("*.json")
         data = json.loads(report.read_text(encoding="utf-8"))
         assert data["summary"]["apps"] >= 3
         assert {"app", "domain", "category", "company", "tracker", "flows", "bytes", "ips"} <= set(
@@ -598,9 +600,9 @@ async def test_screenshots_in_the_same_second_do_not_collide(tmp_path):
         await pilot.press("6")
         await pilot.pause()
         await pilot.press("s")
-        await until(pilot, lambda: len(list((tmp_path / "screenshots").glob("*.png"))) == 1)
+        await until(pilot, lambda: len(list((tmp_path / DEMO / "screenshots").glob("*.png"))) == 1)
         await pilot.press("s")
-        await until(pilot, lambda: len(list((tmp_path / "screenshots").glob("*.png"))) == 2)
+        await until(pilot, lambda: len(list((tmp_path / DEMO / "screenshots").glob("*.png"))) == 2)
 
 
 async def test_conns_tab_follows_the_capture_and_filters(tmp_path):
@@ -624,7 +626,7 @@ async def test_conns_tab_follows_the_capture_and_filters(tmp_path):
         assert 0 < table.row_count == len(shown) < len(tab.items)
         await pilot.press("e")
         await until(pilot, lambda: tab.last_report is not None)
-        names = sorted(p.suffix for p in (tmp_path / "reports").glob("connections-*"))
+        names = sorted(p.suffix for p in (tmp_path / DEMO / "reports").glob("connections-*"))
         assert names == [".csv", ".json", ".sha256"]
 
 
@@ -672,7 +674,7 @@ async def test_score_tab_rates_apps_and_exports(tmp_path):
         assert "start at 100" in str(app.screen.query(Static).last().content)
         await pilot.press("escape", "e")
         await until(pilot, lambda: tab.last_report is not None)
-        assert len(list((tmp_path / "reports").glob("score-*"))) == 3
+        assert len(list((tmp_path / DEMO / "reports").glob("score-*"))) == 3
 
 
 async def test_capture_saves_history_and_the_next_one_compares(tmp_path):
@@ -684,7 +686,7 @@ async def test_capture_saves_history_and_the_next_one_compares(tmp_path):
     old = {"api.fittrack.example": "", "gateway.icloud.com": ""}
     seed = sessions.snapshot([], {}, "00000000-DEMO000000000000", datetime(2026, 1, 1))
     seed["apps"] = {"FitTrack": {"version": "4.1", "domains": old}}
-    sessions.save(tmp_path / "sessions", seed, now=datetime(2026, 1, 1))
+    sessions.save(tmp_path / DEMO / "sessions", seed, now=datetime(2026, 1, 1))
     app, _ = make(tmp_path)
     async with app.run_test(size=SIZE) as pilot:
         await demo_capture(app, pilot, "9", rows=25)
@@ -692,7 +694,7 @@ async def test_capture_saves_history_and_the_next_one_compares(tmp_path):
         assert fit.change.known and fit.updated  # 4.1 in the history, 4.2 on the "device"
         assert "api.fittrack.example" not in fit.change.new_domains
         assert set(fit.new_trackers) <= set(fit.trackers) and fit.new_trackers
-        assert len(list((tmp_path / "sessions").glob("session-*.json"))) == 2
+        assert len(list((tmp_path / DEMO / "sessions").glob("session-*.json"))) == 2
         assert len(app.sessions) == 2
 
 
@@ -723,7 +725,7 @@ async def test_keep_sessions_zero_writes_no_history(tmp_path):
     app = LazyiosApp(backend, tmp_path, keep_sessions=0)
     async with app.run_test(size=SIZE) as pilot:
         await demo_capture(app, pilot, "7")
-    assert not (tmp_path / "sessions").exists()
+    assert not (tmp_path / DEMO / "sessions").exists()
 
 
 def test_keep_sessions_flag():
@@ -748,13 +750,13 @@ async def test_timeline_collects_device_capture_and_contacts(tmp_path):
         assert any(e.summary.startswith("first contact:") and e.app for e in app.timeline.events())
         assert tab.items == sorted(tab.items, key=lambda e: e.time, reverse=True)
         await pilot.press("slash", *"kind:capture", "enter")
-        await pilot.pause(0.2)
         table = tab.query_one("#table", DataTable)
-        assert table.row_count == sum(e.kind == "capture" for e in app.timeline.events()) == 2
+        assert sum(e.kind == "capture" for e in app.timeline.events()) == 2
+        await until(pilot, lambda: table.row_count == 2)  # the table refreshes once a second
         await pilot.press("e")
         await until(pilot, lambda: tab.last_report is not None)
         doc = __import__("json").loads(
-            next((tmp_path / "reports").glob("timeline-*.json")).read_text(encoding="utf-8")
+            next((tmp_path / DEMO / "reports").glob("timeline-*.json")).read_text(encoding="utf-8")
         )
         assert [e["kind"] for e in doc["events"]] == ["capture", "capture"]
 
@@ -859,3 +861,116 @@ async def test_timeline_follows_the_newest_unless_you_scroll(tmp_path):
         app.timeline.add("capture", "even newer")
         tab.refresh_view(force=True)
         assert tab.selected() is picked  # you moved away from the top: your row stays put
+
+
+def test_device_folder_names_are_safe():
+    from lazyios.app import device_folder
+
+    assert device_folder("00008150-000808590AE2401C") == "00008150-000808590AE2401C"
+    assert device_folder("../../etc/passwd") == "etcpasswd"
+    assert device_folder("") == device_folder("../") == "unknown-device"
+    assert len(device_folder("a" * 500)) == 64
+
+
+async def test_overview_shows_battery_health_and_thermal(tmp_path):
+    app, _ = make(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        await until(pilot, lambda: app.info is not None)
+        await pilot.pause()
+        view = text_of(app, "#view")
+        assert "98% (3862 of 3945 mAh design)" in view
+        assert "3.87 V  +450 mA" in view
+        assert "thermal" in view and "not reported" in view
+
+
+async def test_security_audit_opens_and_exports(tmp_path):
+    from lazyios.screens import AuditScreen
+
+    app, _ = make(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        await until(pilot, lambda: app.info is not None)
+        await pilot.press("a")
+        await until(pilot, lambda: isinstance(app.screen, AuditScreen))
+        text = " ".join(str(s.content) for s in app.screen.query(Static))
+        assert "computer backups" in text and "[medium]" in text  # the demo is unencrypted
+        assert "Example VPN (Example Corp)" in text
+        await pilot.press("e")
+        await until(pilot, lambda: list((tmp_path / DEMO / "reports").glob("audit-*.json")))
+        await pilot.press("escape")
+        assert not isinstance(app.screen, AuditScreen)
+
+
+async def test_process_monitor_shows_cpu_and_memory(tmp_path):
+    app, _ = make(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        await until(pilot, lambda: app.info is not None)
+        await pilot.press("3")
+        tab = app.query_one(ProcessesTab)
+        await until(pilot, lambda: tab.items)
+        await pilot.press("m")
+        await until(pilot, lambda: any(s.cpu for s in tab.usage.values()))
+        await until(pilot, lambda: "cores" in text_of(app, "#perf"))
+        assert tab.query_one("#cpu-spark").display
+        cpus = [tab.usage[p.pid].cpu or 0 for p in tab.items]
+        assert cpus == sorted(cpus, reverse=True)  # busiest first
+        assert len(tab.cpu_history) == 120
+        await pilot.press("m")
+        await until(pilot, lambda: not tab.monitoring)
+        assert not tab.query_one("#cpu-spark").display and tab.max_shown is None
+
+
+async def test_switching_devices_starts_a_clean_session(tmp_path):
+    from lazyios.screens import DevicePicker
+
+    app, first = make(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        await demo_capture(app, pilot, "8", rows=5)
+        assert app.aggregator.rows()
+        await pilot.press("d")
+        await until(pilot, lambda: isinstance(app.screen, DevicePicker))
+        table = app.screen.query_one(DataTable)
+        assert table.row_count == 2
+        await pilot.press("down", "enter")
+        await until(pilot, lambda: app.info is not None and app.info.product_type == "iPad16,3")
+        assert first.closed and app.backend is not first
+        assert app.aggregator.rows() == [] and app.flows.rows() == []
+        assert [e.summary for e in app.timeline.events() if e.kind == "device"][-1].startswith(
+            "switched to 00000000-DEMO000000000001"
+        )
+        await pilot.press("8", "space")
+        await until(pilot, lambda: app.flows.rows())
+        await pilot.press("space")
+        await until(pilot, lambda: not app.capturing)
+        assert app.last_capture.parent == tmp_path / "00000000-DEMO000000000001" / "captures"
+    assert list((tmp_path / DEMO / "captures").glob("*.pcap"))  # the first device kept its own
+
+
+async def test_plugged_devices_are_noticed_and_the_lost_one_reconnects(tmp_path):
+    from lazyios.backend import NoDeviceError
+
+    app, backend = make(tmp_path)
+    notes: list[str] = []
+    async with app.run_test(size=SIZE) as pilot:
+        await until(pilot, lambda: app.info is not None)
+        app.notify = lambda message, **_: notes.append(message)  # type: ignore[method-assign]
+        plugged = [DEMO]
+
+        async def ids() -> list[str]:
+            return list(plugged)
+
+        backend.device_ids = ids  # type: ignore[method-assign]
+        await app._poll_devices()  # first look: just remembers
+        plugged.append("NEW-DEVICE")
+        await app._poll_devices()
+        assert any("NEW-DEVICE" in n for n in notes)
+        backend.problem = NoDeviceError("no device connected")
+        await app.refresh_device()
+        plugged.remove(DEMO)
+        await app._poll_devices()
+        assert app.info is None
+        backend.problem = None
+        plugged.append(DEMO)
+        await app._poll_devices()  # the cable is back: reconnect without waiting for the tick
+        assert app.info is not None
+        kinds = [e.summary.split(":")[0] for e in app.timeline.events() if e.kind == "device"]
+        assert kinds.count("plugged in") == 2 and "unplugged" in kinds

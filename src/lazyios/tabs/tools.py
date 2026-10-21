@@ -89,7 +89,7 @@ class ToolsTab(TabBody):
             self.lazy.report(e)
             return
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")[:-3]  # two shots in a second
-        path = self.lazy.out_dir / "screenshots" / f"screenshot-{stamp}.png"
+        path = self.lazy.device_dir / "screenshots" / f"screenshot-{stamp}.png"
         try:
             write_private(path, data)
         except OSError as e:
@@ -133,6 +133,13 @@ class ToolsTab(TabBody):
             return
         self.query_one("#locinfo", Static).update(f"simulating {lat:.5f}, {lon:.5f}   (x clear)")
         self.lazy.timeline.add("condition", f"location simulated at {lat:.5f}, {lon:.5f}")
+
+    def reset_device(self) -> None:
+        super().reset_device()
+        self.last_shot = None
+        self.session_reset()
+        self.query_one("#shot", Static).update("s take   o open")
+        self.notice("")
 
     def session_reset(self) -> None:
         self.query_one("#locinfo", Static).update("session reset   (l edit)")

@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from pymobiledevice3 import usbmux as mux
 from pymobiledevice3.exceptions import (
     ConnectionFailedToUsbmuxdError,
     ConnectionTerminatedError,
@@ -29,30 +30,37 @@ from pymobiledevice3.services.dvt.instruments.graphics import Graphics
 from pymobiledevice3.services.dvt.instruments.location_simulation import LocationSimulation
 from pymobiledevice3.services.dvt.instruments.process_control import ProcessControl
 from pymobiledevice3.services.dvt.instruments.screenshot import Screenshot
+from pymobiledevice3.services.dvt.instruments.sysmontap import Sysmontap
 from pymobiledevice3.services.installation_proxy import InstallationProxyService
+from pymobiledevice3.services.mobile_config import MobileConfigService
 from pymobiledevice3.services.pcapd import DevicePacket, PcapdService
 from pymobiledevice3.services.syslog import SyslogService
 
 from . import usbmuxd
 from .backend import (
     App,
+    AuditFacts,
     BackendError,
     Battery,
     Condition,
     DeviceInfo,
+    DeviceSummary,
     DevModeOffError,
     NoDeviceError,
     NotTrustedError,
     Packet,
     Process,
+    ProcSample,
+    SysSample,
     UsbmuxdError,
     undo_all,
 )
 from .files import create_private
-from .parsing import link_offset, parse_ip_packet
+from .parsing import clean_text, link_offset, parse_ip_packet
 
 LAUNCH_TIMEOUT = 15
 PAYLOAD_MAX = 2048  # enough for a DNS answer or the start of a TLS ClientHello
+SYSMON_MS = 1000
 
 
 @asynccontextmanager
@@ -180,12 +188,17 @@ class DeviceBackend:
             async with DiagnosticsService(ld) as diag:
                 data = await diag.get_battery() or {}
             adapter = data.get("AdapterDetails") or {}
+            details = data.get("BatteryData") or {}
             return Battery(
                 percent=int(data.get("CurrentCapacity", 0)),
                 cycles=int(data.get("CycleCount", 0)),
                 charging=bool(data.get("IsCharging")),
                 watts=adapter.get("Watts"),
                 adapter=str(adapter.get("Description", "")),
+                voltage_mv=_number(data.get("Voltage")),
+                current_ma=_number(data.get("InstantAmperage", data.get("Amperage"))),
+                design_mah=_number(details.get("DesignCapacity")),
+                full_mah=_number(details.get("FullChargeCapacity")),
             )
 
     async def developer_mode(self) -> bool:
@@ -441,6 +454,107 @@ class DeviceBackend:
             async for value in graphics.fps():
                 yield value
 
+    async def sysmon(self) -> AsyncIterator[SysSample]:
+        """CPU and memory, system-wide and per process, about once a second (developer mode)."""
+        async with self._dvt_guard("monitor"):
+            tap = await Sysmontap.create(await self._provider(), interval=SYSMON_MS)
+            fields = list(tap.process_attributes_cls.__dataclass_fields__)
+            system_fields = list(tap.system_attributes_cls.__dataclass_fields__)
+            at = [fields.index(f) for f in ("pid", "name", "cpuUsage", "physFootprint")]
+            cores, cpu, memory = 0, None, None
+            async with tap:
+                async for row in tap:
+                    if not isinstance(row, dict):
+                        continue
+                    if isinstance(usage := row.get("SystemCPUUsage"), dict):
+                        cores = _number(row.get("CPUCount")) or 0
+                        total = _number(usage.get("CPU_TotalLoad"))
+                        cpu = min(100.0, total / cores) if cores and total is not None else None
+                    if isinstance(values := row.get("System"), list):
+                        names = row.get("SystemAttributes") or system_fields
+                        named = dict(zip(names, values, strict=False))  # device data: may differ
+                        used, size = (
+                            _number(named.get("vmUsedCount")),
+                            _number(named.get("physMemSize")),
+                        )
+                        memory = used / size if used is not None and size else None
+                    if isinstance(processes := row.get("Processes"), dict):
+                        samples = (_proc_sample(info, at) for info in processes.values())
+                        yield SysSample(time.time(), cores, cpu, memory,
+                                        tuple(s for s in samples if s is not None))  # fmt: skip
+
+    async def device_ids(self) -> list[str]:
+        async with _guard("device list"):
+            return [d.serial for d in await mux.list_devices()]
+
+    async def devices(self) -> list[DeviceSummary]:
+        """Every device usbmuxd sees. Never pairs: a device without a pairing record on this
+        computer is listed as untrusted instead of being asked to trust it."""
+        async with _guard("device list"):
+            found = await mux.list_devices()
+        out = []
+        for d in found:
+            try:
+                ld = await create_using_usbmux(
+                    serial=d.serial, autopair=False, connection_type=d.connection_type
+                )
+            except (PyMobileDevice3Exception, OSError, EOFError):
+                out.append(DeviceSummary(d.serial, d.connection_type, trusted=False))
+                continue
+            try:
+                v = await ld.get_value()
+            except (PyMobileDevice3Exception, OSError, EOFError):
+                v = {}
+            finally:
+                with suppress(Exception):
+                    await ld.close()
+            out.append(
+                DeviceSummary(
+                    d.serial, d.connection_type, clean_text(str(v.get("DeviceName", ""))),
+                    clean_text(str(v.get("ProductType", ""))),
+                    clean_text(str(v.get("ProductVersion", ""))),
+                )
+            )  # fmt: skip
+        return out
+
+    async def audit_facts(self) -> AuditFacts:
+        """Read-only lookups: lockdown values and the configuration profile list."""
+        async with _guard("audit"):
+            ld = await self._lockdown()
+            v = await ld.get_value()
+            wireless = await _domain(ld, "com.apple.mobile.wireless_lockdown")
+            backup = await _domain(ld, "com.apple.mobile.backup")
+            developer = None
+            with suppress(PyMobileDevice3Exception, OSError):
+                developer = await ld.get_developer_mode_status()
+            profiles, supervised = None, None
+            with suppress(PyMobileDevice3Exception, OSError, EOFError):
+                async with MobileConfigService(ld) as config:  # only the two read requests
+                    meta = (await config.get_profile_list()).get("ProfileMetadata") or {}
+                    profiles = tuple(
+                        (clean_text(str(key)), clean_text(str(m.get("PayloadDisplayName", ""))),
+                         clean_text(str(m.get("PayloadOrganization", ""))))
+                        for key, m in meta.items()
+                        if isinstance(m, dict)
+                    )  # fmt: skip
+                    cloud = await config.get_cloud_configuration() or {}
+                    supervised = _flag(cloud.get("IsSupervised"))
+            return AuditFacts(
+                version=clean_text(str(v.get("ProductVersion", ""))),
+                build=clean_text(str(v.get("BuildVersion", ""))),
+                developer_mode=developer,
+                passcode=_flag(v.get("PasswordProtected")),
+                activation=clean_text(str(v["ActivationState"]))
+                if "ActivationState" in v
+                else None,
+                wifi_debugging=_flag(wireless.get("EnableWifiDebugging")),
+                wifi_connections=_flag(wireless.get("EnableWifiConnections")),
+                backup_encrypted=_flag(backup.get("WillEncrypt")),
+                cloud_backup=_flag(backup.get("CloudBackupEnabled")),
+                supervised=supervised,
+                profiles=profiles,
+            )
+
     async def close(self) -> None:
         """Undo device-side state first, then drop sessions; every step is best effort."""
         self.closed = True
@@ -448,6 +562,34 @@ class DeviceBackend:
         with suppress(Exception):
             await self._reset_tunnel()
         await self._drop_lockdown()
+
+
+def _number(value: Any) -> int | float | None:
+    """A device-supplied number, or None for anything else (bools included)."""
+    return value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+
+def _flag(value: Any) -> bool | None:
+    return value if isinstance(value, bool) else bool(value) if value in (0, 1) else None
+
+
+def _proc_sample(info: Any, at: list[int]) -> ProcSample | None:
+    try:
+        pid, name, cpu, memory = (info[i] for i in at)
+    except (IndexError, KeyError, TypeError):
+        return None
+    if not isinstance(pid, int) or isinstance(pid, bool):
+        return None
+    cpu, memory = _number(cpu), _number(memory)
+    return ProcSample(pid, clean_text(str(name or "")), cpu, int(memory) if memory else None)
+
+
+async def _domain(ld: LockdownClient, domain: str) -> dict[str, Any]:
+    try:
+        value = await ld.get_value(domain=domain)
+    except (PyMobileDevice3Exception, OSError, EOFError):
+        return {}
+    return value if isinstance(value, dict) else {}
 
 
 def _stamp(value: datetime | None) -> str:

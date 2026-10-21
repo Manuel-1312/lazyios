@@ -29,9 +29,9 @@ Tracker data: AdGuard companiesdb, [CC BY-SA 4.0](https://creativecommons.org/li
 
 ## Features
 
-- overview: device info, battery (level, cycles, charger), developer mode state
+- overview: device info, battery (level, cycles, health against design capacity, voltage, current, charger), developer mode state, `a` security audit
 - logs: live syslog with level colors, filter, pause, bounded buffer
-- processes: list, filter, kill (with confirmation), launch by bundle id
+- processes: list, filter, kill (with confirmation), launch by bundle id, `m` live CPU and memory per process with a CPU history sparkline
 - apps: installed user apps, launch with enter
 - network: packet capture to a real `.pcap` with a live table, open in Wireshark; network, thermal and GPU conditions
 - privacy: which app talks to which domain, known trackers flagged, how each name was learned (TLS SNI, DNS or none), filter, sort, JSON and CSV export
@@ -40,6 +40,7 @@ Tracker data: AdGuard companiesdb, [CC BY-SA 4.0](https://creativecommons.org/li
 - timeline: one time-ordered list of device connects and losses, captures, first contacts, network interfaces, syslog errors (folded per process and minute), conditions, app and process starts and exits, alerts and anomalies; time filters, JSON/CSV export
 - anomalies: traffic spikes, connections at a steady interval (beaconing), bursts of never-seen domains and big changes against earlier sessions, each with the numbers behind it
 - tools: screenshot, location simulation, FPS sparkline
+- devices: `d` lists every connected device (model, iOS, trust) and switches to another one; plugs and unplugs are noticed, and a device that comes back reconnects on its own
 - `--demo` runs on fake data, no device needed
 
 ## Install
@@ -88,15 +89,18 @@ lazyios --selftest
 python -m lazyios
 ```
 
-Captures, screenshots and privacy reports go to `~/lazyios/captures`, `~/lazyios/screenshots` and `~/lazyios/reports` unless `--out` says otherwise. A capture stops by itself when its pcap reaches `--max-capture-mb` (1024 by default).
+Each device gets its own folder, named after its UDID: captures, screenshots, reports and session history go to `~/lazyios/<udid>/captures`, `screenshots`, `reports` and `sessions` (`--out` changes `~/lazyios`). Settings files (`alerts.json`, `anomaly.json`) stay in `~/lazyios`. Before 0.3, files went straight into `~/lazyios/captures` and the like; they are left where they are. A capture stops by itself when its pcap reaches `--max-capture-mb` (1024 by default).
 
 | key | action |
 | --- | --- |
 | `1`-`9`, `0` | switch tab |
 | `q` | quit |
+| `d` | devices: list them, switch to another |
 | `?` | help |
 | `/` | focus filter (`esc` to leave) |
 | `r` | refresh |
+| `a` | overview: security audit (`e` exports it) |
+| `m` | processes: live CPU and memory |
 | `p` / `c` / `r` | logs: pause, clear, reconnect now (it also reconnects by itself) |
 | `k` / `l` | processes: kill, launch by bundle id |
 | `enter` | apps: launch; network: apply condition; tools: set location |
@@ -162,6 +166,21 @@ Each rule fires at most once per app and target every 5 minutes. Thresholds go i
 `beacon_jitter`, `beacon_min_interval_s`, `fanout_count`, `fanout_window_s`, `change_factor`,
 `change_min_kb`, `change_sessions`, `cooldown_s`, `rules`). Whether an app runs in the
 background is not judged: none of the interfaces lazyios uses tells which app is in front.
+
+## Performance and security audit
+
+`m` in the processes tab samples CPU and memory once a second through Instruments (Developer
+Mode). CPU is the share of all cores; per process it is the share of one core, so a busy process
+can show more than 100 / cores. Memory in use is what iOS counts as used pages: it keeps memory
+nearly full on purpose, so the per-process footprint says more. Battery temperature and other
+thermal readings are not reported over these interfaces, so lazyios shows them as n/a rather
+than guessing.
+
+`a` in the overview runs a security audit from values the phone reports to a trusted computer:
+passcode set, Developer Mode, debugging and sync over Wi-Fi, encryption of computer backups,
+installed configuration profiles (they can add root certificates, VPNs or management),
+supervision, the iOS build. Each item comes with what was read, why it matters and what to do.
+lazyios cannot see system files, so the audit never says a phone is or is not compromised.
 
 ## Troubleshooting
 

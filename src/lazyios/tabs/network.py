@@ -150,6 +150,13 @@ class NetworkTab(TabBody):
     def action_toggle_capture(self) -> None:
         self.lazy.toggle_capture()
 
+    def reset_device(self) -> None:
+        super().reset_device()
+        self.conditions = []
+        self.render_conditions()
+        self.reset()
+        self.notice("")
+
     def action_reload(self) -> None:
         self.lazy.run_task(self.load(), group=f"load-{self.id}")
 

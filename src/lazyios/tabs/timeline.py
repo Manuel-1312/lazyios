@@ -64,6 +64,11 @@ class TimelineTab(ReportOpener, TableTab[Event]):
     async def load(self) -> None:
         self.refresh_view(force=True)
 
+    def reset_device(self) -> None:
+        super().reset_device()
+        self._seen = -1
+        self.last_report = None
+
     def key(self, item: Event) -> str:
         return str(id(item))
 
@@ -155,7 +160,9 @@ class TimelineTab(ReportOpener, TableTab[Event]):
             self.app.notify("nothing to export", severity="warning")
             return
         try:
-            json_path, csv_path, _ = write_timeline(events, needle, self.lazy.out_dir / "reports")
+            json_path, csv_path, _ = write_timeline(
+                events, needle, self.lazy.device_dir / "reports"
+            )
         except OSError as e:
             self.app.notify(f"cannot write report: {e}", severity="error", markup=False)
             return
