@@ -6,7 +6,7 @@
 
 Like lazygit, but for your iPhone. A keyboard-driven terminal app that talks to an iPhone over USB: read the system log, list and kill processes, launch apps, capture network traffic to a `.pcap`, throttle the network, take screenshots, fake a location, watch FPS. It runs on Windows, macOS and Linux, needs no jailbreak, no Xcode and no admin rights. Built on [Textual](https://github.com/Textualize/textual), using [pymobiledevice3](https://github.com/doronz88/pymobiledevice3) as a library.
 
-![lazyios demo: logs, a live packet capture and the privacy tab](docs/demo.gif)
+![lazyios demo: a live capture, every connection with its domain, privacy scores per app, the timeline and the security audit](docs/demo.gif)
 
 ## Who is your iPhone talking to?
 
