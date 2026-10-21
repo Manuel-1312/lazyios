@@ -303,6 +303,7 @@ class DeviceBackend:
                     name=a.get("CFBundleDisplayName") or a.get("CFBundleName") or bid,
                     bundle_id=bid,
                     version=str(a.get("CFBundleShortVersionString", "")),
+                    executable=str(a.get("CFBundleExecutable", "")),
                 )
                 for bid, a in raw.items()
                 if bid

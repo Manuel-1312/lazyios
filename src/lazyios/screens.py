@@ -12,7 +12,7 @@ from .art import header
 
 HELP = """\
  global
-   1-8        switch tab
+   1-9        switch tab
    q          quit (clears condition and location)
    ?          this help
    /          focus the filter, esc to leave it
@@ -30,6 +30,8 @@ HELP = """\
  conns       space start/stop capture   s sort   n new destinations only
              e export (json, csv, sha256)   o open it
              / filter: words, or app: domain: ip: port:443 proto:udp
+ score       privacy score per app, new domains vs earlier sessions
+             s sort   c how the score works   e export   o open it
 """
 
 
@@ -80,10 +82,20 @@ class Prompt(ModalScreen[str | None]):
         self.dismiss(None)
 
 
-class Help(ModalScreen[None]):
+class TextScreen(ModalScreen[None]):
     BINDINGS = [Binding("escape,question_mark,q", "dismiss", "close")]
+
+    def __init__(self, title: str, text: str) -> None:
+        super().__init__()
+        self.title_text = title
+        self.text = text
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
-            yield Static(header("keys"), classes="dialog-title")
-            yield Static(HELP)
+            yield Static(header(self.title_text), classes="dialog-title")
+            yield Static(self.text, markup=False)
+
+
+class Help(TextScreen):
+    def __init__(self) -> None:
+        super().__init__("keys", HELP)

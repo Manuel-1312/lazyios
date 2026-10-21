@@ -36,6 +36,7 @@ Tracker data: AdGuard companiesdb, [CC BY-SA 4.0](https://creativecommons.org/li
 - network: packet capture to a real `.pcap` with a live table, open in Wireshark; network, thermal and GPU conditions
 - privacy: which app talks to which domain, known trackers flagged, how each name was learned (TLS SNI, DNS or none), filter, sort, JSON and CSV export
 - conns: every connection from the capture with app, pid, endpoints, bytes up and down, new vs returning destinations, domain with a confidence level, `app:` `domain:` `ip:` `port:` `proto:` filters, JSON/CSV export with a SHA-256 file
+- score: a privacy score per app with every point taken off explained, tracker companies, domains new since earlier captures of the same phone (and whether the app was updated in between), configurable alerts
 - tools: screenshot, location simulation, FPS sparkline
 - `--demo` runs on fake data, no device needed
 
@@ -79,7 +80,7 @@ Use Python 3.12: on newer versions a few pymobiledevice3 dependencies have no pr
 ## Usage
 
 ```
-lazyios [--udid UDID] [--out DIR] [--max-capture-mb MB] [--demo]
+lazyios [--udid UDID] [--out DIR] [--max-capture-mb MB] [--keep-sessions N] [--demo]
 lazyios --version
 lazyios --selftest
 python -m lazyios
@@ -89,7 +90,7 @@ Captures, screenshots and privacy reports go to `~/lazyios/captures`, `~/lazyios
 
 | key | action |
 | --- | --- |
-| `1`-`8` | switch tab |
+| `1`-`9` | switch tab |
 | `q` | quit |
 | `?` | help |
 | `/` | focus filter (`esc` to leave) |
@@ -102,10 +103,35 @@ Captures, screenshots and privacy reports go to `~/lazyios/captures`, `~/lazyios
 | `s` / `t` | privacy: cycle sort, trackers only |
 | `e` / `o` | privacy, conns: export a report, open it |
 | `n` | conns: new destinations only |
+| `c` | score: how the score works |
 | `s` | conns: cycle sort (last, bytes, app) |
 | `x` | clear condition (network) or location (tools) |
 | `s` / `o` | tools: screenshot, open it |
 | `l` / `f` | tools: edit coordinates, start/stop FPS |
+
+## Privacy score, history and alerts
+
+The score starts at 100 per app. Each distinct tracker domain takes off 12 (ads), 8 (analytics)
+or 5 (telemetry), half that when the name only comes from a DNS answer, since CDN addresses are
+shared. Trackers take off at most 75, and 10 more go when 10% or more of the app's bytes went to
+trackers. Unknown domains and bare addresses take nothing off: there is no evidence either way.
+Grades: A 90+, B 75+, C 60+, D 40+, F below. Press `c` in the score tab for the same list.
+
+When a capture stops, the app -> domain names it saw (never IPs or payloads) go to
+`~/lazyios/sessions`, one owner-only file per capture, the newest 30 kept (`--keep-sessions N`,
+`0` to keep none). The next capture on the same phone is compared with the last 10: new domains
+per app, new trackers among them, and the app version before and after when it changed. An app
+seen for the first time is marked `first` and nothing is called new.
+
+Alerts are read from `~/lazyios/alerts.json` (all keys optional):
+
+```json
+{"new_tracker": true, "tracker": false, "new_domain": false, "watch": ["facebook.com"]}
+```
+
+`new_tracker` and `new_domain` need history for the app; `watch` matches the domain and its
+subdomains. A file with unknown keys or wrong types is ignored as a whole and lazyios says why.
+Everything stays on your machine: nothing is sent anywhere.
 
 ## Troubleshooting
 

@@ -72,6 +72,7 @@ class App:
     name: str
     bundle_id: str
     version: str
+    executable: str = ""  # CFBundleExecutable, the process name packets carry
 
 
 @dataclass(frozen=True)

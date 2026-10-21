@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, TypeVar
 
 from rich.text import Text
@@ -10,6 +11,7 @@ from textual.binding import Binding
 from textual.containers import Vertical
 from textual.widgets import DataTable, Input, Static
 
+from .. import opener
 from ..art import header
 from ..parsing import matches_filter
 from ..theme import RED
@@ -138,3 +140,21 @@ class TableTab(TabBody, Generic[T]):
 
     def action_reload(self) -> None:
         self.lazy.run_task(self.load(), group=f"load-{self.id}")
+
+
+class ReportOpener:
+    """For tabs that export reports: `o` opens the last one with the OS handler."""
+
+    app: Any
+    last_report: Path | None = None
+
+    def action_open_report(self) -> None:
+        if self.last_report is None or not self.last_report.exists():
+            self.app.notify("no report yet: press e", severity="warning")
+            return
+        try:
+            opener.open_default(self.last_report)
+        except OSError as e:
+            self.app.notify(f"cannot open: {e}", severity="error", markup=False)
+            return
+        self.app.notify("opened report")

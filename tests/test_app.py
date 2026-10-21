@@ -50,8 +50,18 @@ async def test_tab_switching(tmp_path):
     async with app.run_test(size=SIZE) as pilot:
         tabs = app.query_one(TabbedContent)
         for key, name in zip(
-            "12345678",
-            ("overview", "logs", "processes", "apps", "network", "tools", "privacy", "conns"),
+            "123456789",
+            (
+                "overview",
+                "logs",
+                "processes",
+                "apps",
+                "network",
+                "tools",
+                "privacy",
+                "conns",
+                "score",
+            ),
             strict=True,
         ):
             await pilot.press(key)
@@ -517,10 +527,11 @@ async def test_capture_is_shared_between_tabs(tmp_path):
         await until(pilot, lambda: not app.capturing)
         assert backend.captures == 1
         assert network.count == network.query_one("#packets", DataTable).row_count
-        before = len(app.aggregator.rows())
+        before = app.aggregator.rows()
         await pilot.press("space")  # a new capture starts clean
         await pilot.pause(0.1)
-        assert backend.captures == 2 and len(app.aggregator.rows()) <= before
+        assert backend.captures == 2
+        assert not any(row is old for row in app.aggregator.rows() for old in before)
         await pilot.press("space")
         await until(pilot, lambda: not app.capturing)
 
@@ -631,3 +642,93 @@ async def test_conns_new_only_toggle(tmp_path):
         await pilot.pause(0.2)
         assert all(tab.accepts(f) == f.new for f in tab.items)
         assert tab.query_one("#table", DataTable).row_count <= everything
+
+
+async def demo_capture(app: LazyiosApp, pilot, tab: str, rows: int = 15) -> None:
+    await until(pilot, lambda: app.info is not None)
+    await pilot.press(tab, "space")
+    await until(pilot, lambda: len(app.aggregator.rows()) > rows, timeout=15)
+    await pilot.press("space")
+    await until(pilot, lambda: not app.capturing)
+    await pilot.pause(0.2)
+
+
+async def test_score_tab_rates_apps_and_exports(tmp_path):
+    from lazyios.tabs.score import ScoreTab
+
+    app, _ = make(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.press("9")
+        tab = app.query_one(ScoreTab)
+        assert "space" in str(tab.query_one(".notice", Static).content)
+        await demo_capture(app, pilot, "9")
+        assert tab.query_one("#table", DataTable).row_count == len(tab.items) > 3
+        assert any(a.trackers and a.score < 100 for a in tab.items)
+        assert all(a.change is not None and not a.change.known for a in tab.items)  # no history
+        assert "first capture" in str(tab.query_one("#why", Static).content)
+        await pilot.press("c")
+        await pilot.pause()
+        assert "start at 100" in str(app.screen.query(Static).last().content)
+        await pilot.press("escape", "e")
+        await until(pilot, lambda: tab.last_report is not None)
+        assert len(list((tmp_path / "reports").glob("score-*"))) == 3
+
+
+async def test_capture_saves_history_and_the_next_one_compares(tmp_path):
+    from datetime import datetime
+
+    from lazyios import sessions
+    from lazyios.tabs.score import ScoreTab
+
+    old = {"api.fittrack.example": "", "gateway.icloud.com": ""}
+    seed = sessions.snapshot([], {}, "00000000-DEMO000000000000", datetime(2026, 1, 1))
+    seed["apps"] = {"FitTrack": {"version": "4.1", "domains": old}}
+    sessions.save(tmp_path / "sessions", seed, now=datetime(2026, 1, 1))
+    app, _ = make(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        await demo_capture(app, pilot, "9", rows=25)
+        fit = next(a for a in app.query_one(ScoreTab).items if a.app == "FitTrack")
+        assert fit.change.known and fit.updated  # 4.1 in the history, 4.2 on the "device"
+        assert "api.fittrack.example" not in fit.change.new_domains
+        assert set(fit.new_trackers) <= set(fit.trackers) and fit.new_trackers
+        assert len(list((tmp_path / "sessions").glob("session-*.json"))) == 2
+        assert len(app.sessions) == 2
+
+
+async def test_alerts_fire_for_watched_domains(tmp_path):
+    (tmp_path / "alerts.json").write_text('{"watch": ["doubleclick.net"]}', encoding="utf-8")
+    app, _ = make(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        await demo_capture(app, pilot, "9", rows=30)
+        await until(pilot, lambda: any("doubleclick" in a[2] for a in app.alerts), timeout=10)
+        assert all(reason == "watched domain" for *_, reason in app.alerts)
+
+
+async def test_bad_alerts_file_warns_and_keeps_defaults(tmp_path):
+    from lazyios.alerts import AlertRules
+
+    (tmp_path / "alerts.json").write_text('{"watch": "x"}', encoding="utf-8")
+    app, _ = make(tmp_path)
+    notes: list[str] = []
+    app.notify = lambda message, **_: notes.append(message)  # type: ignore[method-assign]
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.pause()
+    assert app.rules == AlertRules()
+    assert any("alerts.json" in n for n in notes)
+
+
+async def test_keep_sessions_zero_writes_no_history(tmp_path):
+    backend = FakeBackend(interval=0.01)
+    app = LazyiosApp(backend, tmp_path, keep_sessions=0)
+    async with app.run_test(size=SIZE) as pilot:
+        await demo_capture(app, pilot, "7")
+    assert not (tmp_path / "sessions").exists()
+
+
+def test_keep_sessions_flag():
+    from lazyios.__main__ import parse_args
+
+    assert parse_args(["--keep-sessions", "0"]).keep_sessions == 0
+    assert parse_args([]).keep_sessions == 30
+    with pytest.raises(SystemExit):
+        parse_args(["--keep-sessions", "-1"])

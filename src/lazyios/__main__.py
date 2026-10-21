@@ -11,14 +11,19 @@ from pathlib import Path
 from . import __version__
 from .app import MAX_CAPTURE_MB, MB, LazyiosApp
 from .backend import Backend
+from .sessions import KEEP
 
 CLOSE_TIMEOUT = 5
 
 
-def _positive(value: str) -> int:
-    if not (value.isascii() and value.isdigit()) or int(value) < 1:
-        raise argparse.ArgumentTypeError("must be a whole number of 1 or more")
+def _count(value: str, least: int = 0) -> int:
+    if not (value.isascii() and value.isdigit()) or int(value) < least:
+        raise argparse.ArgumentTypeError(f"must be a whole number of {least} or more")
     return int(value)
+
+
+def _positive(value: str) -> int:
+    return _count(value, 1)
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -38,6 +43,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=MAX_CAPTURE_MB,
         metavar="MB",
         help=f"stop a capture when its pcap reaches this size (default: {MAX_CAPTURE_MB})",
+    )
+    parser.add_argument(
+        "--keep-sessions",
+        type=_count,
+        default=KEEP,
+        metavar="N",
+        help=f"session history files kept for comparisons, 0 keeps none (default: {KEEP})",
     )
     parser.add_argument("--version", action="version", version=f"lazyios {__version__}")
     parser.add_argument("--selftest", action="store_true", help="boot the demo headless and exit")
@@ -89,7 +101,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     backend = make_backend(args)
     try:
         with contextlib.suppress(KeyboardInterrupt):
-            LazyiosApp(backend, args.out, args.max_capture_mb * MB).run()
+            LazyiosApp(backend, args.out, args.max_capture_mb * MB, args.keep_sessions).run()
     finally:
         if not backend.closed:  # the app's own shutdown did not run
             with contextlib.suppress(Exception):

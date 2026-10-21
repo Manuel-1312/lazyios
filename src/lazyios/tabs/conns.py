@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 from rich.text import Text
@@ -8,11 +7,10 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.widgets import DataTable, Input, Static, TabbedContent
 
-from .. import opener
 from ..art import header
 from ..flows import SORTS, Flow, matches, sort_flows, write_flows
 from ..theme import ACID, BONE, DIM, GRAY
-from .base import TableTab
+from .base import ReportOpener, TableTab
 from .privacy import VIA, age, clock, fit, human_bytes
 
 REFRESH = 1.0
@@ -28,7 +26,7 @@ CAVEAT = Text(
 HINT = "press space to start a capture (shared with network and privacy)"
 
 
-class ConnsTab(TableTab[Flow]):
+class ConnsTab(ReportOpener, TableTab[Flow]):
     title = "connections"
     max_shown = 500
     columns = (
@@ -56,7 +54,6 @@ class ConnsTab(TableTab[Flow]):
         super().__init__(**kwargs)
         self.sort = SORTS[0]
         self.new_only = False
-        self.last_report: Path | None = None
         self._seen = -1
 
     def compose(self) -> ComposeResult:
@@ -186,14 +183,3 @@ class ConnsTab(TableTab[Flow]):
             return
         self.last_report = csv_path
         self.app.notify(f"saved {json_path} (+ .csv, .sha256), o to open", markup=False)
-
-    def action_open_report(self) -> None:
-        if self.last_report is None or not self.last_report.exists():
-            self.app.notify("no report yet: press e", severity="warning")
-            return
-        try:
-            opener.open_default(self.last_report)
-        except OSError as e:
-            self.app.notify(f"cannot open: {e}", severity="error", markup=False)
-            return
-        self.app.notify("opened report")

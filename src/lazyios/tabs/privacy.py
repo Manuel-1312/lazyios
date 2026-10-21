@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 from rich.text import Text
@@ -9,11 +8,10 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.widgets import DataTable, Input, Static, TabbedContent
 
-from .. import opener
 from ..art import header
 from ..privacy import SORTS, HostRow, sort_rows, summarize, write_report
 from ..theme import BONE, DIM, GRAY, RED
-from .base import TableTab
+from .base import ReportOpener, TableTab
 
 REFRESH = 1.0
 NARROW = (11, 20, 9, 9)  # app, domain, category, company
@@ -48,7 +46,7 @@ def clock(when: float) -> str:
     return datetime.fromtimestamp(when).strftime("%H:%M:%S")
 
 
-class PrivacyTab(TableTab[HostRow]):
+class PrivacyTab(ReportOpener, TableTab[HostRow]):
     title = "privacy"
     columns = (
         ("app", False),
@@ -74,7 +72,6 @@ class PrivacyTab(TableTab[HostRow]):
         super().__init__(**kwargs)
         self.sort = SORTS[0]
         self.trackers_only = False
-        self.last_report: Path | None = None
         self._seen = -1
 
     def compose(self) -> ComposeResult:
@@ -196,14 +193,3 @@ class PrivacyTab(TableTab[HostRow]):
             return
         self.last_report = csv_path
         self.app.notify(f"report saved: {json_path} (+ .csv), o to open", markup=False)
-
-    def action_open_report(self) -> None:
-        if self.last_report is None or not self.last_report.exists():
-            self.app.notify("no report yet: press e", severity="warning")
-            return
-        try:
-            opener.open_default(self.last_report)
-        except OSError as e:
-            self.app.notify(f"cannot open: {e}", severity="error", markup=False)
-            return
-        self.app.notify("opened report")

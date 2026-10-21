@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -19,6 +19,7 @@ MAX_ROWS = 2000
 MAX_NAMES = 10000
 MAX_FLOWS = 512  # per row; the flow count stops growing past this
 MAX_ROW_IPS = 16
+MAX_ADDED = 1000
 KERNEL_PID = 0xFFFFFFFF
 EPHEMERAL = 49152
 DNS_PORTS = (53, 5353)
@@ -113,12 +114,14 @@ class HostAggregator:
         self._names: OrderedDict[str, str] = OrderedDict()  # ip -> name, from DNS answers
         self._sni: OrderedDict[tuple[str, str], str] = OrderedDict()  # (app, ip) -> TLS name
         self._bare: dict[str, set[str]] = {}  # ip -> apps with a row under that bare address
+        self.added: deque[HostRow] = deque(maxlen=MAX_ADDED)  # new rows, drained by alerts
 
     def reset(self) -> None:
         self._rows.clear()
         self._names.clear()
         self._sni.clear()
         self._bare.clear()
+        self.added.clear()
         self.latest = 0.0
         self.version += 1
 
@@ -172,6 +175,7 @@ class HostAggregator:
             if hit := self.trackers.lookup(domain):
                 row.category, row.company = hit
             self._rows[key] = row
+            self.added.append(row)
             if source == "ip":
                 self._bare.setdefault(domain, set()).add(process)
             while len(self._rows) > MAX_ROWS:

@@ -10,6 +10,9 @@ fake.py       FakeBackend: canned data for --demo, --selftest and every UI test
 parsing.py    pure parsers: syslog, IPv4/IPv6, DNS answers, TLS SNI (fuzzed, bounded)
 privacy.py    HostAggregator: packets -> (app, domain) rows, tracker lookup, DNS/SNI names
 flows.py      FlowTable: packets -> one row per connection, bytes each way, name confidence
+score.py      privacy score per app from the privacy rows, with the reason for every point
+sessions.py   local history of app -> domains per capture, compared with the next one
+alerts.py     alert rules from <out>/alerts.json (validated, defaults on any error)
 files.py      owner-only output files, JSON/CSV reports with a SHA-256 file
 app.py        Textual app: status line, workers, the one shared capture
 tabs/         one widget per tab; TableTab gives filter + refresh to list tabs
@@ -59,3 +62,5 @@ not in this table is not promised.
 | battery level, cycles, charger | `DiagnosticsService.get_battery` | no | yes |
 | battery temperature | `get_battery` top level | - | **no** `Temperature` key on this build |
 | syslog | `SyslogService` | no | yes |
+| app version by process name | `InstallationProxyService` `CFBundleExecutable` | no | yes (316 apps; 19 Flutter apps share `Runner`, so they get no version) |
+| process names in packets | pcapd `comm` | no | yes, cut to 16 characters |

@@ -98,10 +98,15 @@ _PROCS = [
 ]
 
 _APPS = [
-    App("Maps", "com.example.maps", "3.2.1"),
-    App("Notes", "com.example.notes", "1.9"),
-    App("Terminal", "com.example.terminal", "2.0.4"),
-    App("Weather", "com.example.weather", "7.1"),
+    App("FitTrack", "com.example.fittrack", "4.2", "FitTrack"),
+    App("Maps", "com.example.maps", "3.2.1", "Maps"),
+    App("NewsDaily", "com.example.newsdaily", "12.0.3", "NewsDaily"),
+    App("Notes", "com.example.notes", "1.9", "Notes"),
+    App("PhotoBox", "com.example.photobox", "2.8", "PhotoBox"),
+    App("QuickChat", "com.example.quickchat", "5.1", "QuickChat"),
+    App("Terminal", "com.example.terminal", "2.0.4", "Terminal"),
+    App("Weather", "com.example.weather", "7.1", "Weather"),
+    App("Weatherly", "com.example.weatherly", "3.3", "Weatherly"),
 ]
 
 _CONDITIONS = [
