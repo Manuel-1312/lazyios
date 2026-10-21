@@ -253,6 +253,7 @@ class FakeBackend:
         self.cleared_conditions = 0
         self.cleared_locations = 0
         self.captures = 0
+        self.process_calls = 0
         self.closed = False
         self.on_reset: Callable[[], None] | None = None
         self.clear_failures = 0
@@ -300,7 +301,12 @@ class FakeBackend:
 
     async def processes(self) -> list[Process]:
         await self.open_tunnel()
-        return [Process(pid, name, app, "10-19 08:12:00") for name, pid, app in _PROCS]
+        self.process_calls += 1  # Maps comes and goes, so the timeline has starts and exits
+        return [
+            Process(pid, name, app, "10-19 08:12:00")
+            for name, pid, app in _PROCS
+            if name != "Maps" or self.process_calls % 2
+        ]
 
     async def kill(self, pid: int) -> None:
         await self.open_tunnel()

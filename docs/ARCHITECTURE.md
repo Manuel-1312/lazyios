@@ -13,6 +13,8 @@ flows.py      FlowTable: packets -> one row per connection, bytes each way, name
 score.py      privacy score per app from the privacy rows, with the reason for every point
 sessions.py   local history of app -> domains per capture, compared with the next one
 alerts.py     alert rules from <out>/alerts.json (validated, defaults on any error)
+timeline.py   bounded event list, syslog folding, process start/exit diff, time queries
+anomaly.py    spike, beacon, fanout and change rules with <out>/anomaly.json thresholds
 files.py      owner-only output files, JSON/CSV reports with a SHA-256 file
 app.py        Textual app: status line, workers, the one shared capture
 tabs/         one widget per tab; TableTab gives filter + refresh to list tabs
@@ -64,3 +66,6 @@ not in this table is not promised.
 | syslog | `SyslogService` | no | yes |
 | app version by process name | `InstallationProxyService` `CFBundleExecutable` | no | yes (316 apps; 19 Flutter apps share `Runner`, so they get no version) |
 | process names in packets | pcapd `comm` | no | yes, cut to 16 characters |
+| process start times | DVT `proclist` `startDate` | yes | yes (641 of 642; a list takes ~1 s) |
+| syslog volume | `SyslogService` | no | ~700-840 lines/s, ~30 errors/s on an idle phone |
+| which app is in front | - | - | **not available** through these interfaces |

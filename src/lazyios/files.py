@@ -8,9 +8,11 @@ import io
 import json
 import os
 import sys
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, TypeVar
+
+T = TypeVar("T")
 
 
 def private_dir(path: Path) -> Path:
@@ -33,6 +35,23 @@ def write_private(path: Path, data: bytes) -> Path:
     with create_private(path) as out:
         out.write(data)
     return path
+
+
+def read_config(
+    path: Path, parse: Callable[[str], T], default: T, max_file: int = 64 * 1024
+) -> tuple[T, str | None]:
+    """A settings file read as untrusted input. Returns the default plus the reason when the file
+    is unusable; parse raises ValueError with a message fit for the user."""
+    try:
+        if not path.is_file():
+            return default, None
+        if path.stat().st_size > max_file:
+            return default, f"{path.name} is larger than {max_file // 1024} KB, using defaults"
+        return parse(path.read_text(encoding="utf-8")), None
+    except (OSError, UnicodeDecodeError) as e:
+        return default, f"cannot read {path.name}: {type(e).__name__}, using defaults"
+    except ValueError as e:
+        return default, f"{path.name}: {e}, using defaults"
 
 
 def csv_safe(value: Any) -> Any:

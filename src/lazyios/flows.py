@@ -88,15 +88,16 @@ class FlowTable:
     def rows(self) -> list[Flow]:
         return list(self._flows.values())
 
-    def feed(self, p: Packet) -> None:
+    def feed(self, p: Packet) -> Flow | None:
+        """Account the packet; returns its flow when the packet opened a new one."""
         if p.proto not in _PROTOS:
-            return
+            return None
         src, sport = split_endpoint(p.src)
         dst, dport = split_endpoint(p.dst)
         try:
             outbound = remote_is_dst(src, sport, dst, dport)
         except ValueError:
-            return
+            return None
         local, remote = (p.src, p.dst) if outbound else (p.dst, p.src)
         rip, rport = (dst, dport) if outbound else (src, sport)
         process = "-" if p.pid == KERNEL_PID else clean_text(p.process) or "-"
@@ -104,6 +105,7 @@ class FlowTable:
         if p.pid == KERNEL_PID and (owner := self._owners.get(key[1:])) in self._flows:
             key = owner  # pktap left the pid off, but protocol and both endpoints are that app's
         flow = self._flows.get(key)
+        opened = flow is None
         if flow is None:
             flow = Flow(
                 p.pid, process, p.proto, clean_text(p.interface), local, remote, rip, rport,
@@ -129,6 +131,7 @@ class FlowTable:
         flow.first, flow.last = min(flow.first, p.time), max(flow.last, p.time)
         self.latest = max(self.latest, p.time)
         self.version += 1
+        return flow if opened else None
 
     def _count(self, process: str, ip: str, port: int | None) -> int:
         dest = (process, ip, port)
@@ -232,7 +235,7 @@ def write_flows(
         },
         "rows": data,
     }
-    header = list(report_rows([Flow(0, "", "", "", "", "", "", None, 0.0, 0.0)])[0])
+    header = list(data[0]) if data else []
     return write_tables(
         folder / f"connections-{now.strftime('%Y%m%d-%H%M%S-%f')[:-3]}",
         document,

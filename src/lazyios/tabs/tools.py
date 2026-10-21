@@ -132,6 +132,7 @@ class ToolsTab(TabBody):
             self.lazy.report(e)
             return
         self.query_one("#locinfo", Static).update(f"simulating {lat:.5f}, {lon:.5f}   (x clear)")
+        self.lazy.timeline.add("condition", f"location simulated at {lat:.5f}, {lon:.5f}")
 
     def session_reset(self) -> None:
         self.query_one("#locinfo", Static).update("session reset   (l edit)")
@@ -146,6 +147,7 @@ class ToolsTab(TabBody):
             self.lazy.report(e)
             return
         self.query_one("#locinfo", Static).update("location real   (l edit)")
+        self.lazy.timeline.add("condition", "location simulation cleared")
 
     def action_toggle_fps(self) -> None:
         if self._fps_worker is not None and self.fps_running:

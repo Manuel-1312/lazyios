@@ -104,6 +104,13 @@ class LogsTab(TabBody):
     def add(self, line: LogLine) -> None:
         self.buffer.append(line)
         self.pending.append(line)
+        self.lazy.timeline.syslog(line)
+
+    def ensure_stream(self) -> None:
+        """Start following syslog without showing the tab (the timeline wants its errors)."""
+        if not self._loaded:
+            self._loaded = True
+            self.lazy.run_task(self.load(), group=f"load-{self.id}")
 
     def _visible(self, line: LogLine) -> bool:
         needle = self.query_one("#filter", Input).value

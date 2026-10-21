@@ -183,7 +183,7 @@ def write_scores(
         "top_tracker_companies": dict(top_companies(scores, 10)),
         "apps": data,
     }
-    header = list(report_rows([AppScore("")])[0])
+    header = list(data[0]) if data else []
     return write_tables(
         folder / f"score-{now.strftime('%Y%m%d-%H%M%S-%f')[:-3]}",
         document,

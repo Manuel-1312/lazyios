@@ -12,7 +12,7 @@ from .art import header
 
 HELP = """\
  global
-   1-9        switch tab
+   1-9, 0     switch tab
    q          quit (clears condition and location)
    ?          this help
    /          focus the filter, esc to leave it
@@ -32,6 +32,10 @@ HELP = """\
              / filter: words, or app: domain: ip: port:443 proto:udp
  score       privacy score per app, new domains vs earlier sessions
              s sort   c how the score works   e export   o open it
+ timeline    device, capture, first contacts, syslog errors, conditions,
+             alerts and anomalies, newest first   p watch processes
+             / kind:app,anomaly app:x since:10:05 until:10:30 last:5m
+             e export (what the filter shows)   o open it
 """
 
 

@@ -37,6 +37,8 @@ Tracker data: AdGuard companiesdb, [CC BY-SA 4.0](https://creativecommons.org/li
 - privacy: which app talks to which domain, known trackers flagged, how each name was learned (TLS SNI, DNS or none), filter, sort, JSON and CSV export
 - conns: every connection from the capture with app, pid, endpoints, bytes up and down, new vs returning destinations, domain with a confidence level, `app:` `domain:` `ip:` `port:` `proto:` filters, JSON/CSV export with a SHA-256 file
 - score: a privacy score per app with every point taken off explained, tracker companies, domains new since earlier captures of the same phone (and whether the app was updated in between), configurable alerts
+- timeline: one time-ordered list of device connects and losses, captures, first contacts, network interfaces, syslog errors (folded per process and minute), conditions, app and process starts and exits, alerts and anomalies; time filters, JSON/CSV export
+- anomalies: traffic spikes, connections at a steady interval (beaconing), bursts of never-seen domains and big changes against earlier sessions, each with the numbers behind it
 - tools: screenshot, location simulation, FPS sparkline
 - `--demo` runs on fake data, no device needed
 
@@ -90,7 +92,7 @@ Captures, screenshots and privacy reports go to `~/lazyios/captures`, `~/lazyios
 
 | key | action |
 | --- | --- |
-| `1`-`9` | switch tab |
+| `1`-`9`, `0` | switch tab |
 | `q` | quit |
 | `?` | help |
 | `/` | focus filter (`esc` to leave) |
@@ -104,6 +106,7 @@ Captures, screenshots and privacy reports go to `~/lazyios/captures`, `~/lazyios
 | `e` / `o` | privacy, conns: export a report, open it |
 | `n` | conns: new destinations only |
 | `c` | score: how the score works |
+| `p` | timeline: watch process starts and exits |
 | `s` | conns: cycle sort (last, bytes, app) |
 | `x` | clear condition (network) or location (tools) |
 | `s` / `o` | tools: screenshot, open it |
@@ -132,6 +135,33 @@ Alerts are read from `~/lazyios/alerts.json` (all keys optional):
 `new_tracker` and `new_domain` need history for the app; `watch` matches the domain and its
 subdomains. A file with unknown keys or wrong types is ignored as a whole and lazyios says why.
 Everything stays on your machine: nothing is sent anywhere.
+
+## Timeline and anomalies
+
+The timeline (tab `0`) keeps the last 20000 events of the session. Filter with
+`kind:app,anomaly`, `app:maps`, `since:10:05`, `until:10:30` (today) or `last:5m`, plus free
+words; `e` exports what the filter shows. Packet events carry the phone's capture timestamp,
+the rest the computer's clock; exports write ISO 8601 times with the UTC offset and the raw
+epoch. Process starts show the start time the phone reports; exits are only known to fall
+within the 5 s polling interval (`p`, needs Developer Mode). Syslog errors come at hundreds per
+minute, so they are folded into one event per process and minute with a count; faults are kept
+one by one.
+
+The anomaly rules run on the capture and say what they measured and against what:
+
+| rule | fires when | default |
+| --- | --- | --- |
+| spike | an app's bytes in one window are N times its median window | 10 s windows, 5x, at least 1 MB, 6 windows of history |
+| beacon | connections to one address and port at a steady interval | 6 connections, spread under 10% of the interval, interval of 5 s or more |
+| fanout | domains the app never used in earlier sessions, in a short time | 10 within 60 s; apps without history are skipped |
+| change | bytes per minute against earlier sessions, at the end of a capture | 10x the median of 3+ sessions, at least 512 KB |
+
+Each rule fires at most once per app and target every 5 minutes. Thresholds go in
+`~/lazyios/anomaly.json`, for example `{"spike_factor": 8, "beacon_count": 8, "rules": ["spike",
+"beacon"]}` (keys: `window_s`, `spike_factor`, `spike_min_kb`, `spike_history`, `beacon_count`,
+`beacon_jitter`, `beacon_min_interval_s`, `fanout_count`, `fanout_window_s`, `change_factor`,
+`change_min_kb`, `change_sessions`, `cooldown_s`, `rules`). Whether an app runs in the
+background is not judged: none of the interfaces lazyios uses tells which app is in front.
 
 ## Troubleshooting
 

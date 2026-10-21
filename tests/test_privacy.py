@@ -343,6 +343,15 @@ def test_summary_counts_and_reset():
     assert agg.summary() == (0, 0, 0) and agg.rows() == []
 
 
+def test_empty_report_needs_no_timestamps(tmp_path):
+    from lazyios.privacy import write_report
+
+    # headers come from the rows: formatting a dummy epoch 0 raises OSError on Windows west of UTC
+    json_path, csv_path = write_report([], tmp_path)
+    assert csv_path.read_text(encoding="utf-8").strip() == ""
+    assert '"rows": []' in json_path.read_text(encoding="utf-8")
+
+
 def test_csv_cells(tmp_path):
     from lazyios.privacy import HostRow, write_report
 

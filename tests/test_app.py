@@ -50,7 +50,7 @@ async def test_tab_switching(tmp_path):
     async with app.run_test(size=SIZE) as pilot:
         tabs = app.query_one(TabbedContent)
         for key, name in zip(
-            "123456789",
+            "1234567890",
             (
                 "overview",
                 "logs",
@@ -61,6 +61,7 @@ async def test_tab_switching(tmp_path):
                 "privacy",
                 "conns",
                 "score",
+                "timeline",
             ),
             strict=True,
         ):
@@ -732,3 +733,128 @@ def test_keep_sessions_flag():
     assert parse_args([]).keep_sessions == 30
     with pytest.raises(SystemExit):
         parse_args(["--keep-sessions", "-1"])
+
+
+async def test_timeline_collects_device_capture_and_contacts(tmp_path):
+    from lazyios.tabs.timeline import TimelineTab
+
+    app, _ = make(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        await demo_capture(app, pilot, "0", rows=10)
+        tab = app.query_one(TimelineTab)
+        await until(pilot, lambda: tab.query_one("#table", DataTable).row_count > 5)
+        kinds = {e.kind for e in app.timeline.events()}
+        assert {"device", "capture", "connection", "network"} <= kinds
+        assert any(e.summary.startswith("first contact:") and e.app for e in app.timeline.events())
+        assert tab.items == sorted(tab.items, key=lambda e: e.time, reverse=True)
+        await pilot.press("slash", *"kind:capture", "enter")
+        await pilot.pause(0.2)
+        table = tab.query_one("#table", DataTable)
+        assert table.row_count == sum(e.kind == "capture" for e in app.timeline.events()) == 2
+        await pilot.press("e")
+        await until(pilot, lambda: tab.last_report is not None)
+        doc = __import__("json").loads(
+            next((tmp_path / "reports").glob("timeline-*.json")).read_text(encoding="utf-8")
+        )
+        assert [e["kind"] for e in doc["events"]] == ["capture", "capture"]
+
+
+async def test_timeline_follows_syslog_errors_and_processes(tmp_path, monkeypatch):
+    from lazyios import app as app_module
+
+    monkeypatch.setattr(app_module, "PROCESS_POLL", 0.05)
+    app, _ = make(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        await until(pilot, lambda: app.info is not None)
+        await pilot.press("0")  # starts the syslog stream without opening the logs tab
+        await until(pilot, lambda: any(e.kind == "syslog" for e in app.timeline.events()), 15)
+        await pilot.press("p")
+
+        def maps(verb: str) -> bool:
+            return any(e.kind == "app" and e.app == "Maps" and verb in e.summary
+                       for e in app.timeline.events())  # fmt: skip
+
+        await until(pilot, lambda: maps("exited") and maps("started"))  # demo Maps comes and goes
+        await pilot.press("p")
+        await until(pilot, lambda: not app.watching_processes)
+        assert app.timeline.events()[-1].summary == "watch stopped"
+
+
+async def test_conditions_and_errors_reach_the_timeline(tmp_path):
+    app, backend = make(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        await until(pilot, lambda: app.info is not None)
+        await pilot.press("5")
+        table = app.query_one(NetworkTab).query_one("#conditions", DataTable)
+        await until(pilot, lambda: table.row_count > 0)
+        await pilot.press("enter")
+        await until(pilot, lambda: backend.active_condition is not None)
+        await pilot.press("x")
+        await until(pilot, lambda: backend.active_condition is None)
+        await pilot.pause(0.1)
+        conditions = [e.summary for e in app.timeline.events() if e.kind == "condition"]
+        assert conditions[0].startswith("set ") and conditions[-1] == "cleared"
+        app.report(BackendError("boom"))
+        assert app.timeline.events()[-1].kind == "error"
+
+
+async def test_device_loss_is_on_the_timeline(tmp_path):
+    from lazyios.backend import NoDeviceError
+
+    app, backend = make(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        await until(pilot, lambda: app.info is not None)
+        backend.problem = NoDeviceError("no device connected")
+        await app.refresh_device()
+        backend.problem = None
+        await app.refresh_device()
+        device = [e.summary for e in app.timeline.events() if e.kind == "device"]
+        assert device[0].startswith("connected") and device[1].startswith("lost: no device")
+        assert device[2].startswith("connected")
+
+
+async def test_anomaly_findings_go_to_timeline_and_toast(tmp_path):
+    from lazyios.anomaly import Finding
+
+    app, _ = make(tmp_path)
+    notes: list[str] = []
+    app.notify = lambda message, **_: notes.append(message)  # type: ignore[method-assign]
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.pause()
+        app.detector.findings.append(Finding("beacon", "QuickChat", "6 connections", "d", 1.0))
+        app.check_new_rows()
+        [event] = [e for e in app.timeline.events() if e.kind == "anomaly"]
+        assert event.summary == "beacon: 6 connections" and event.app == "QuickChat"
+        assert any("QuickChat: beacon" in n for n in notes)
+
+
+async def test_bad_anomaly_file_warns(tmp_path):
+    (tmp_path / "anomaly.json").write_text('{"window_s": "ten"}', encoding="utf-8")
+    app, _ = make(tmp_path)
+    notes: list[str] = []
+    app.notify = lambda message, **_: notes.append(message)  # type: ignore[method-assign]
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.pause()
+    assert any("anomaly.json: window_s must be a number" in n for n in notes)
+
+
+async def test_timeline_follows_the_newest_unless_you_scroll(tmp_path):
+    from lazyios.tabs.timeline import TimelineTab
+
+    app, _ = make(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        await until(pilot, lambda: app.info is not None)
+        await pilot.press("0")
+        tab = app.query_one(TimelineTab)
+        for i in range(5):
+            app.timeline.add("capture", f"e{i}")
+        tab.refresh_view(force=True)
+        table = tab.query_one("#table", DataTable)
+        app.timeline.add("capture", "newest")
+        tab.refresh_view(force=True)
+        assert table.cursor_row == 0 and tab.selected().summary == "newest"
+        await pilot.press("down", "down")
+        picked = tab.selected()
+        app.timeline.add("capture", "even newer")
+        tab.refresh_view(force=True)
+        assert tab.selected() is picked  # you moved away from the top: your row stays put

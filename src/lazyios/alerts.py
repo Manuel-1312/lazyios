@@ -18,6 +18,7 @@ import json
 from dataclasses import dataclass, fields
 from pathlib import Path
 
+from .files import read_config
 from .parsing import sanitize_host
 from .privacy import HostRow
 
@@ -83,14 +84,4 @@ def parse(text: str) -> AlertRules:
 
 def load(folder: Path) -> tuple[AlertRules, str | None]:
     """The rules in folder/alerts.json, or the defaults; the second item says what went wrong."""
-    path = folder / FILE
-    try:
-        if not path.is_file():
-            return AlertRules(), None
-        if path.stat().st_size > MAX_FILE:
-            return AlertRules(), f"{FILE} is larger than {MAX_FILE // 1024} KB, using defaults"
-        return parse(path.read_text(encoding="utf-8")), None
-    except (OSError, UnicodeDecodeError) as e:
-        return AlertRules(), f"cannot read {FILE}: {type(e).__name__}, using defaults"
-    except ValueError as e:
-        return AlertRules(), f"{FILE}: {e}, using defaults"
+    return read_config(folder / FILE, parse, AlertRules(), MAX_FILE)

@@ -264,7 +264,7 @@ def write_report(
     data = report_rows(rows)
     summary = dict(zip(("apps", "domains", "trackers"), summarize(rows), strict=True))
     document = {"generated": _stamp(now.timestamp()), "summary": summary, "rows": data}
-    header = list(report_rows([HostRow("", "")])[0])
+    header = list(data[0]) if data else []
     json_path, csv_path, _ = write_tables(
         folder / f"privacy-{now.strftime('%Y%m%d-%H%M%S-%f')[:-3]}",
         document,

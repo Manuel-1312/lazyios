@@ -31,6 +31,7 @@ COMM_LEN = 16  # the kernel keeps this much of a process name, and pcapd reports
 class AppHistory:
     version: str | None
     domains: dict[str, str]  # domain -> category, "" when not in the tracker data
+    bytes: int = 0
 
 
 @dataclass(frozen=True)
@@ -38,6 +39,7 @@ class Session:
     started: str
     udid: str
     apps: dict[str, AppHistory]
+    seconds: float = 0.0  # first to last packet
 
 
 @dataclass
@@ -68,16 +70,21 @@ def versions_by_process(apps: Iterable[App]) -> dict[str, str]:
 def snapshot(
     rows: Iterable[HostRow], versions: dict[str, str], udid: str, when: datetime
 ) -> dict[str, Any]:
+    rows = list(rows)
     apps: dict[str, dict[str, Any]] = {}
     for r in rows:
-        if r.source == "ip":
-            continue
-        entry = apps.setdefault(r.process, {"version": versions.get(r.process), "domains": {}})
-        entry["domains"][r.domain] = r.category
+        entry = apps.setdefault(
+            r.process, {"version": versions.get(r.process), "bytes": 0, "domains": {}}
+        )
+        entry["bytes"] += r.bytes
+        if r.source != "ip":
+            entry["domains"][r.domain] = r.category
+    seconds = max(r.last for r in rows) - min(r.first for r in rows) if rows else 0.0
     return {
         "format": FORMAT,
         "started": when.isoformat(timespec="seconds"),
         "udid": udid,
+        "seconds": round(seconds, 3),
         "apps": apps,
     }
 
@@ -104,14 +111,15 @@ def parse(text: str) -> Session | None:
     started, udid, apps = data.get("started"), data.get("udid"), data.get("apps")
     if not (isinstance(started, str) and isinstance(udid, str) and isinstance(apps, dict)):
         return None
-    if len(apps) > MAX_APPS:
+    seconds = data.get("seconds", 0.0)
+    if len(apps) > MAX_APPS or not _count(seconds, float):
         return None
     out: dict[str, AppHistory] = {}
     for name, entry in apps.items():
         if not (isinstance(name, str) and isinstance(entry, dict)):
             return None
-        version, domains = entry.get("version"), entry.get("domains")
-        if version is not None and not isinstance(version, str):
+        version, domains, size = entry.get("version"), entry.get("domains"), entry.get("bytes", 0)
+        if version is not None and not isinstance(version, str) or not _count(size, int):
             return None
         if not isinstance(domains, dict) or len(domains) > MAX_DOMAINS:
             return None
@@ -120,8 +128,14 @@ def parse(text: str) -> Session | None:
             for domain, category in domains.items()
             if isinstance(category, str) and (host := sanitize_host(domain))
         }
-        out[clean_text(name)] = AppHistory(clean_text(version) if version else None, clean)
-    return Session(clean_text(started, 32), clean_text(udid), out)
+        out[clean_text(name)] = AppHistory(clean_text(version) if version else None, clean, size)
+    return Session(clean_text(started, 32), clean_text(udid), out, float(seconds))
+
+
+def _count(value: object, kind: type) -> bool:
+    """A non-negative int (or, for float, any non-negative number); never a bool."""
+    numbers = (int, float) if kind is float else (int,)
+    return not isinstance(value, bool) and isinstance(value, numbers) and value >= 0
 
 
 def load(folder: Path, limit: int = KEEP) -> list[Session]:

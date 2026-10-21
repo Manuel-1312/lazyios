@@ -129,6 +129,7 @@ class NetworkTab(TabBody):
             return
         self.lazy.update_status()
         self.render_conditions()
+        self.lazy.timeline.add("condition", f"set {condition.profile_id}", detail=condition.name)
         self.app.notify(
             f"condition active: {condition.profile_id}", severity="warning", markup=False
         )
@@ -141,6 +142,8 @@ class NetworkTab(TabBody):
             await self.lazy.backend.clear_condition()
         except BackendError as e:
             self.lazy.report(e)
+        else:
+            self.lazy.timeline.add("condition", "cleared")
         self.lazy.update_status()
         self.render_conditions()
 

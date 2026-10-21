@@ -51,7 +51,8 @@ def test_snapshot_keeps_names_not_addresses():
         "U1",
         WHEN,
     )
-    assert data["apps"] == {"A": {"version": "1.0", "domains": {"x.example": "ads"}}}
+    assert data["apps"] == {"A": {"version": "1.0", "bytes": 20, "domains": {"x.example": "ads"}}}
+    assert data["seconds"] == 0.0
     assert parse(json.dumps(data)) is not None
 
 
