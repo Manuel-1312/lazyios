@@ -8,7 +8,9 @@ from textual.widgets import Static
 
 from .. import usbmuxd
 from ..art import LOGO, LOGO_COMPACT, LOGO_HEIGHT, LOGO_WIDTH, TAG, bar, header
-from ..backend import BackendError, NoDeviceError, NotTrustedError, UsbmuxdError
+from ..audit import assess
+from ..backend import BackendError, Battery, NoDeviceError, NotTrustedError, UsbmuxdError
+from ..screens import AuditScreen
 from ..theme import ACID, BONE, DIM, GRAY, RED
 from .base import TabBody
 
@@ -19,7 +21,10 @@ def _row(label: str, value: str, style: str = BONE) -> Text:
 
 class OverviewTab(TabBody):
     title = "overview"
-    BINDINGS = [Binding("r", "reload", "refresh")]
+    BINDINGS = [
+        Binding("r", "reload", "refresh", id="refresh"),
+        Binding("a", "audit", "security audit", id="audit"),
+    ]
     can_focus = True
 
     def compose(self) -> ComposeResult:
@@ -33,6 +38,20 @@ class OverviewTab(TabBody):
 
     def action_reload(self) -> None:
         self.lazy.run_task(self.lazy.refresh_device(verbose=True), group="refresh")
+
+    def action_audit(self) -> None:
+        self.lazy.run_task(self._audit(), group="audit")
+
+    async def _audit(self) -> None:
+        app = self.lazy
+        if app.info is None:
+            self.app.notify("no device to audit", severity="warning")
+            return
+        checks = assess(await app.backend.audit_facts())
+        device = f"{app.info.product_type} {app.info.udid}"
+        app.push_screen(
+            AuditScreen(checks, device, app.device_dir / "reports", app.scrub, app.saved)
+        )
 
     def _logo(self) -> Text:
         if self.size.width >= LOGO_WIDTH + 2 and self.size.height >= LOGO_HEIGHT + 19:
@@ -63,7 +82,10 @@ class OverviewTab(TabBody):
                 parts += [
                     _row("level", f"{battery.percent:>3}% {bar(battery.percent, 20)}", ACID),
                     _row("cycles", str(battery.cycles)),
+                    _row("health", _health(battery)),
                     _row("power", _power(battery.charging, battery.watts, battery.adapter)),
+                    _row("now", _electrical(battery)),
+                    _row("thermal", "n/a: not reported over these interfaces", GRAY),
                 ]
             dev = app.dev_mode
             parts += [
@@ -97,6 +119,21 @@ def _problem_lines(problem: BackendError | None) -> list[Text]:
     else:
         title, todo = "device error", str(problem)
     return [Text(f"  {title}", style=f"bold {RED}"), Text(f"  {todo}", style=GRAY)]
+
+
+def _health(b: Battery) -> str:
+    if b.health is None:
+        return "n/a"
+    return f"{b.health:.0%} ({b.full_mah} of {b.design_mah} mAh design)"
+
+
+def _electrical(b: Battery) -> str:
+    parts = []
+    if b.voltage_mv is not None:
+        parts.append(f"{b.voltage_mv / 1000:.2f} V")
+    if b.current_ma is not None:
+        parts.append(f"{int(b.current_ma):+d} mA")
+    return "  ".join(parts) or "n/a"
 
 
 def _power(charging: bool, watts: int | None, adapter: str) -> str:

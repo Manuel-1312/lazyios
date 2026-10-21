@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 from rich.text import Text
@@ -9,11 +8,10 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.widgets import DataTable, Input, Static, TabbedContent
 
-from .. import opener
 from ..art import header
 from ..privacy import SORTS, HostRow, sort_rows, summarize, write_report
 from ..theme import BONE, DIM, GRAY, RED
-from .base import TableTab
+from .base import ReportOpener, TableTab
 
 REFRESH = 1.0
 NARROW = (11, 20, 9, 9)  # app, domain, category, company
@@ -22,6 +20,7 @@ WIDE_FROM = 100
 CAVEAT = Text(
     "names: unauthenticated DNS + TLS SNI; DoH, ECH, QUIC, Relay show as bare IPs", style=DIM
 )
+VIA = {"sni": "sni", "dns": "dns", "ip": "-"}
 HINT = "press space to start a capture, then use your apps"
 
 
@@ -47,24 +46,25 @@ def clock(when: float) -> str:
     return datetime.fromtimestamp(when).strftime("%H:%M:%S")
 
 
-class PrivacyTab(TableTab[HostRow]):
+class PrivacyTab(ReportOpener, TableTab[HostRow]):
     title = "privacy"
     columns = (
         ("app", False),
         ("domain", False),
         ("category", False),
         ("company", False),
+        ("via", False),
         ("flows", True),
         ("bytes", True),
         ("last", True),
     )
     BINDINGS = [
-        Binding("slash", "focus_filter", "filter"),
-        Binding("space", "toggle_capture", "capture"),
-        Binding("s", "cycle_sort", "sort"),
-        Binding("t", "toggle_trackers", "trackers"),
-        Binding("e", "export", "export"),
-        Binding("o", "open_report", "open"),
+        Binding("slash", "focus_filter", "filter", id="filter"),
+        Binding("space", "toggle_capture", "capture", id="capture"),
+        Binding("s", "cycle_sort", "sort", id="sort"),
+        Binding("t", "toggle_trackers", "trackers", id="trackers"),
+        Binding("e", "export", "export", id="export"),
+        Binding("o", "open_report", "open", id="open"),
         Binding("escape", "focus_table", show=False),
     ]
 
@@ -72,7 +72,6 @@ class PrivacyTab(TableTab[HostRow]):
         super().__init__(**kwargs)
         self.sort = SORTS[0]
         self.trackers_only = False
-        self.last_report: Path | None = None
         self._seen = -1
 
     def compose(self) -> ComposeResult:
@@ -94,6 +93,11 @@ class PrivacyTab(TableTab[HostRow]):
     async def load(self) -> None:
         self.refresh_view(force=True)
 
+    def reset_device(self) -> None:
+        super().reset_device()
+        self._seen = -1
+        self.last_report = None
+
     def key(self, item: HostRow) -> str:
         return f"{item.process}\x00{item.domain}"
 
@@ -112,6 +116,7 @@ class PrivacyTab(TableTab[HostRow]):
             Text(fit(item.domain, domain), style=style),
             Text(item.category or "-", style=RED if item.tracker else GRAY),
             Text(fit(item.company or "-", company), style=style if item.company else GRAY),
+            Text(VIA[item.source], style=GRAY),
             Text(str(item.flows), style=style, justify="right"),
             Text(human_bytes(item.bytes), style=style, justify="right"),
             Text(age(self.lazy.aggregator.latest - item.last), style=GRAY, justify="right"),
@@ -187,20 +192,12 @@ class PrivacyTab(TableTab[HostRow]):
             self.app.notify("nothing to export yet", severity="warning")
             return
         try:
-            json_path, csv_path = write_report(rows, self.lazy.out_dir / "reports")
+            json_path, csv_path = write_report(
+                rows, self.lazy.device_dir / "reports", scrub=self.lazy.scrub
+            )
         except OSError as e:
             self.app.notify(f"cannot write report: {e}", severity="error", markup=False)
             return
         self.last_report = csv_path
+        self.lazy.saved(csv_path.parent, "privacy")
         self.app.notify(f"report saved: {json_path} (+ .csv), o to open", markup=False)
-
-    def action_open_report(self) -> None:
-        if self.last_report is None or not self.last_report.exists():
-            self.app.notify("no report yet: press e", severity="warning")
-            return
-        try:
-            opener.open_default(self.last_report)
-        except OSError as e:
-            self.app.notify(f"cannot open: {e}", severity="error", markup=False)
-            return
-        self.app.notify("opened report")

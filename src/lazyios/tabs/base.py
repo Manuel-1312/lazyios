@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, TypeVar
 
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
+from textual.events import Resize
 from textual.widgets import DataTable, Input, Static
 
+from .. import opener
 from ..art import header
 from ..parsing import matches_filter
 from ..theme import RED
@@ -43,6 +46,10 @@ class TabBody(Vertical):
     async def load(self) -> None:
         """Fetch the initial data."""
 
+    def reset_device(self) -> None:
+        """Another device was picked: forget what was shown, load again on next activation."""
+        self._loaded = False
+
     def notice(self, message: str) -> None:
         widget = self.query_one(".notice", Static)
         widget.update(Text(message, style=f"bold {RED}") if message else "")
@@ -54,9 +61,10 @@ class TableTab(TabBody, Generic[T]):
 
     focus_id = "#table"
     columns: ClassVar[tuple[tuple[str, bool], ...]] = ()
+    max_shown: ClassVar[int | None] = None
     BINDINGS = [
-        Binding("slash", "focus_filter", "filter"),
-        Binding("r", "reload", "refresh"),
+        Binding("slash", "focus_filter", "filter", id="filter"),
+        Binding("r", "reload", "refresh", id="refresh"),
         Binding("escape", "focus_table", show=False),
     ]
 
@@ -77,6 +85,10 @@ class TableTab(TabBody, Generic[T]):
         """Extra per-tab row filter, applied together with the text filter."""
         return True
 
+    def matches(self, item: T, needle: str) -> bool:
+        """The text filter; tabs with a query syntax override it."""
+        return matches_filter(needle, *self.haystack(item))
+
     def compose(self) -> ComposeResult:
         yield Static(header(self.title), classes="head")
         yield Input(placeholder="/ filter", id="filter")
@@ -96,6 +108,10 @@ class TableTab(TabBody, Generic[T]):
         row_key = table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value
         return next((i for i in self.items if self.key(i) == row_key), None)
 
+    def reset_device(self) -> None:
+        super().reset_device()
+        self.set_items([])
+
     def set_items(self, items: list[T]) -> None:
         self.items = items
         self.render_rows()
@@ -105,9 +121,9 @@ class TableTab(TabBody, Generic[T]):
         keep = self.selected()
         needle = self.query_one("#filter", Input).value
         table.clear()
-        shown = [
-            i for i in self.items if self.accepts(i) and matches_filter(needle, *self.haystack(i))
-        ]
+        shown = [i for i in self.items if self.accepts(i) and self.matches(i, needle)]
+        if self.max_shown is not None:  # keeps rebuilding the table cheap on long captures
+            shown = shown[: self.max_shown]
         for item in shown:
             table.add_row(*self.cells(item), key=self.key(item))
         if keep is not None:
@@ -122,6 +138,10 @@ class TableTab(TabBody, Generic[T]):
         if event.input.id == "filter":
             self.render_rows()
 
+    def on_resize(self, event: Resize) -> None:
+        if self.items:  # some tabs size their columns to the width
+            self.render_rows()
+
     def on_input_submitted(self, event: Input.Submitted) -> None:
         self.action_focus_table()
 
@@ -133,3 +153,21 @@ class TableTab(TabBody, Generic[T]):
 
     def action_reload(self) -> None:
         self.lazy.run_task(self.load(), group=f"load-{self.id}")
+
+
+class ReportOpener:
+    """For tabs that export reports: `o` opens the last one with the OS handler."""
+
+    app: Any
+    last_report: Path | None = None
+
+    def action_open_report(self) -> None:
+        if self.last_report is None or not self.last_report.exists():
+            self.app.notify("no report yet: press e", severity="warning")
+            return
+        try:
+            opener.open_default(self.last_report)
+        except OSError as e:
+            self.app.notify(f"cannot open: {e}", severity="error", markup=False)
+            return
+        self.app.notify("opened report")

@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import struct
 from dataclasses import dataclass
+from functools import lru_cache
 from ipaddress import IPv4Address, IPv6Address
 
 from .backend import LogLine
@@ -157,6 +158,7 @@ def sanitize_host(name: str | None) -> str | None:
     return name if len(name) <= 253 and _HOST.fullmatch(name) else None
 
 
+@lru_cache(maxsize=8192)  # called for every packet with the same few process names
 def clean_text(value: str, limit: int = 64) -> str:
     """Printable characters only, bounded: for names that come from the device."""
     return "".join(c for c in value[:limit] if c.isprintable())

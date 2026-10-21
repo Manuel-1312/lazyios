@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import time
 from collections import deque
 from contextlib import aclosing
+from datetime import datetime
 from pathlib import Path
 
 from textual.app import ComposeResult
@@ -14,6 +14,7 @@ from textual.worker import Worker
 from .. import opener
 from ..art import header
 from ..backend import BackendError
+from ..files import write_private
 from .base import TabBody
 
 SAMPLES = 60
@@ -31,11 +32,11 @@ class ToolsTab(TabBody):
     title = "tools"
     can_focus = True
     BINDINGS = [
-        Binding("s", "screenshot", "screenshot"),
-        Binding("o", "open_screenshot", "open"),
-        Binding("l", "edit_location", "coords"),
-        Binding("x", "clear_location", "clear loc"),
-        Binding("f", "toggle_fps", "fps"),
+        Binding("s", "screenshot", "screenshot", id="screenshot"),
+        Binding("o", "open_screenshot", "open", id="open"),
+        Binding("l", "edit_location", "coords", id="coords"),
+        Binding("x", "clear_location", "clear loc", id="clear-location"),
+        Binding("f", "toggle_fps", "fps", id="fps"),
         Binding("escape", "focus_self", show=False),
     ]
 
@@ -87,12 +88,15 @@ class ToolsTab(TabBody):
         except BackendError as e:
             self.lazy.report(e)
             return
-        path = (
-            self.lazy.out_dir / "screenshots" / f"screenshot-{time.strftime('%Y%m%d-%H%M%S')}.png"
-        )
-        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        path.write_bytes(data)
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")[:-3]  # two shots in a second
+        path = self.lazy.device_dir / "screenshots" / f"screenshot-{stamp}.png"
+        try:
+            write_private(path, data)
+        except OSError as e:
+            self.app.notify(f"cannot save screenshot: {e}", severity="error", markup=False)
+            return
         self.last_shot = path
+        self.lazy.saved(path.parent, "screenshot")
         self.query_one("#shot", Static).update(f"saved {path}   (o open)")
 
     def action_open_screenshot(self) -> None:
@@ -129,6 +133,14 @@ class ToolsTab(TabBody):
             self.lazy.report(e)
             return
         self.query_one("#locinfo", Static).update(f"simulating {lat:.5f}, {lon:.5f}   (x clear)")
+        self.lazy.timeline.add("condition", f"location simulated at {lat:.5f}, {lon:.5f}")
+
+    def reset_device(self) -> None:
+        super().reset_device()
+        self.last_shot = None
+        self.session_reset()
+        self.query_one("#shot", Static).update("s take   o open")
+        self.notice("")
 
     def session_reset(self) -> None:
         self.query_one("#locinfo", Static).update("session reset   (l edit)")
@@ -143,6 +155,7 @@ class ToolsTab(TabBody):
             self.lazy.report(e)
             return
         self.query_one("#locinfo", Static).update("location real   (l edit)")
+        self.lazy.timeline.add("condition", "location simulation cleared")
 
     def action_toggle_fps(self) -> None:
         if self._fps_worker is not None and self.fps_running:
@@ -154,6 +167,7 @@ class ToolsTab(TabBody):
         if not await self._ready():
             return
         self.fps_running = True
+        self.lazy.update_status()
         info = self.query_one("#fpsinfo", Static)
         spark = self.query_one("#spark", Sparkline)
         try:
@@ -166,4 +180,5 @@ class ToolsTab(TabBody):
             self.lazy.report(e)
         finally:
             self.fps_running = False
+            self.lazy.update_status()
             info.update("stopped   (f start)")

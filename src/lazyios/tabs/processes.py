@@ -1,38 +1,86 @@
 from __future__ import annotations
 
+from collections import deque
+from contextlib import aclosing
 from typing import Any
 
 from rich.text import Text
+from textual.app import ComposeResult
 from textual.binding import Binding
+from textual.widgets import DataTable, Input, Sparkline, Static
+from textual.worker import Worker
 
-from ..backend import BackendError, Process
+from ..art import header
+from ..backend import BackendError, Process, ProcSample, SysSample
 from ..screens import Confirm, Prompt
-from ..theme import BONE, GRAY
+from ..theme import ACID, BONE, DIM, GRAY
 from .base import TableTab
+from .privacy import human_bytes
+
+HISTORY = 120  # samples of total CPU kept for the sparkline, about two minutes
+MONITOR_ROWS = 300  # busiest processes shown while the monitor runs
 
 
 class ProcessesTab(TableTab[Process]):
     title = "processes"
-    columns = (("pid", True), ("name", False), ("app", False), ("started", False))
+    columns = (
+        ("pid", True),
+        ("name", False),
+        ("app", False),
+        ("started", False),
+        ("cpu %", True),
+        ("memory", True),
+    )
     BINDINGS = [
         *TableTab.BINDINGS,
-        Binding("k", "kill", "kill"),
-        Binding("l", "launch", "launch"),
+        Binding("k", "kill", "kill", id="kill"),
+        Binding("l", "launch", "launch", id="launch"),
+        Binding("m", "toggle_monitor", "cpu/mem", id="monitor"),
     ]
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.usage: dict[int, ProcSample] = {}
+        self.cpu_history: deque[float] = deque([0.0] * HISTORY, maxlen=HISTORY)
+        self.monitoring = False
+        self._monitor: Worker[None] | None = None
+
+    def compose(self) -> ComposeResult:
+        yield Static(header(self.title), classes="head")
+        yield Static("", id="perf")
+        yield Sparkline(list(self.cpu_history), id="cpu-spark")
+        yield Input(placeholder="/ filter", id="filter")
+        yield Static("", classes="notice")
+        yield DataTable(id="table", cursor_type="row")
+
+    def on_mount(self) -> None:  # Textual also runs TableTab.on_mount (columns) on its own
+        self.query_one("#cpu-spark").display = False
+        self.query_one("#perf", Static).update(Text("m live cpu and memory", style=DIM))
 
     def key(self, item: Process) -> str:
         return str(item.pid)
 
     def cells(self, item: Process) -> tuple[Any, ...]:
+        sample = self.usage.get(item.pid)
+        cpu = sample.cpu if sample else None
+        memory = sample.memory if sample else None
         return (
             Text(str(item.pid), justify="right"),
             Text(item.name, style=BONE if item.is_app else GRAY),
             "yes" if item.is_app else "-",
             item.started,
-        )
+            Text("-" if cpu is None else f"{cpu:.1f}", style=ACID if cpu and cpu >= 10 else GRAY,
+                 justify="right"),
+            Text("-" if memory is None else human_bytes(memory), style=GRAY, justify="right"),
+        )  # fmt: skip
 
     def haystack(self, item: Process) -> tuple[str, ...]:
         return (item.name, str(item.pid))
+
+    def reset_device(self) -> None:
+        super().reset_device()
+        self.usage = {}
+        self.cpu_history.extend([0.0] * HISTORY)
 
     async def load(self) -> None:
         if message := await self.lazy.open_dvt():
@@ -46,6 +94,53 @@ class ProcessesTab(TableTab[Process]):
             return
         self.notice("")
         self.set_items(sorted(processes, key=lambda p: p.pid))
+
+    def action_toggle_monitor(self) -> None:
+        if self._monitor is not None and self.monitoring:
+            self._monitor.cancel()
+            return
+        self._monitor = self.lazy.run_task(self._run_monitor(), group="monitor")
+
+    async def _run_monitor(self) -> None:
+        if message := await self.lazy.open_dvt():
+            self.notice(message)
+            return
+        self.monitoring = True
+        self.lazy.update_status()
+        self.max_shown = MONITOR_ROWS
+        self.query_one("#cpu-spark").display = True
+        try:
+            async with aclosing(self.lazy.backend.sysmon()) as samples:
+                async for sample in samples:
+                    self.show_sample(sample)
+        except BackendError as e:
+            self.lazy.report(e)
+        finally:
+            self.monitoring = False
+            self.lazy.update_status()
+            self.max_shown = None
+            self.query_one("#cpu-spark").display = False
+            self.query_one("#perf", Static).update(Text("monitor stopped :: m to start", style=DIM))
+
+    def show_sample(self, sample: SysSample) -> None:
+        """Busiest processes first; processes the list did not have yet are added."""
+        self.usage = {p.pid: p for p in sample.processes}
+        known = {p.pid: p for p in self.items}
+        merged = [known.get(s.pid) or Process(s.pid, s.name, False, "") for s in sample.processes]
+        merged.sort(key=lambda p: -(self.usage[p.pid].cpu or 0.0))
+        self.set_items(merged)
+        if sample.cpu is not None:
+            self.cpu_history.append(sample.cpu)
+            self.query_one("#cpu-spark", Sparkline).data = list(self.cpu_history)
+        cpu = "-" if sample.cpu is None else f"{sample.cpu:.0f}%"
+        memory = "-" if sample.memory is None else f"{sample.memory:.0%}"
+        self.query_one("#perf", Static).update(
+            Text.assemble(
+                ("cpu ", GRAY), (cpu, ACID), (f" of {sample.cores} cores", GRAY),
+                ("  memory ", GRAY), (memory, BONE), (" in use, iOS keeps it full", DIM),
+                (f"  {len(sample.processes)} processes", GRAY), ("  m stop", DIM),
+            )
+        )  # fmt: skip
 
     def action_kill(self) -> None:
         process = self.selected()

@@ -47,6 +47,61 @@ class Battery:
     charging: bool
     watts: int | None = None
     adapter: str = ""
+    voltage_mv: int | None = None
+    current_ma: int | None = None  # positive while charging
+    design_mah: int | None = None
+    full_mah: int | None = None  # what a full charge holds today
+
+    @property
+    def health(self) -> float | None:
+        """Full charge capacity against design capacity, the way Settings reports it."""
+        if not self.design_mah or not self.full_mah:
+            return None
+        return self.full_mah / self.design_mah
+
+
+@dataclass(frozen=True)
+class ProcSample:
+    pid: int
+    name: str
+    cpu: float | None  # percent of one core; None in the first sample
+    memory: int | None  # physical footprint, bytes
+
+
+@dataclass(frozen=True)
+class SysSample:
+    time: float
+    cores: int
+    cpu: float | None  # percent of all cores together, 0-100
+    memory: float | None  # fraction of physical memory in use
+    processes: tuple[ProcSample, ...] = ()
+
+
+@dataclass(frozen=True)
+class DeviceSummary:
+    udid: str
+    connection: str  # USB or Network
+    name: str = ""
+    product_type: str = ""
+    version: str = ""
+    trusted: bool = True  # False: this computer has no pairing record for it
+
+
+@dataclass(frozen=True)
+class AuditFacts:
+    """Raw security-relevant values; None where the device did not answer."""
+
+    version: str
+    build: str
+    developer_mode: bool | None = None
+    passcode: bool | None = None
+    activation: str | None = None
+    wifi_debugging: bool | None = None
+    wifi_connections: bool | None = None
+    backup_encrypted: bool | None = None
+    cloud_backup: bool | None = None
+    supervised: bool | None = None
+    profiles: tuple[tuple[str, str, str], ...] | None = None  # (identifier, name, organization)
 
 
 @dataclass(frozen=True)
@@ -72,6 +127,7 @@ class App:
     name: str
     bundle_id: str
     version: str
+    executable: str = ""  # CFBundleExecutable, the process name packets carry
 
 
 @dataclass(frozen=True)
@@ -129,4 +185,8 @@ class Backend(Protocol):
     async def set_location(self, lat: float, lon: float) -> None: ...
     async def clear_location(self) -> None: ...
     def fps(self) -> AsyncIterator[int]: ...
+    def sysmon(self) -> AsyncIterator[SysSample]: ...
+    async def device_ids(self) -> list[str]: ...
+    async def devices(self) -> list[DeviceSummary]: ...
+    async def audit_facts(self) -> AuditFacts: ...
     async def close(self) -> None: ...

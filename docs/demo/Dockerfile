@@ -13,7 +13,7 @@ COPY pyproject.toml README.md LICENSE /src/
 COPY src /src/src
 RUN python3 -m venv /opt/lazyios \
     && /opt/lazyios/bin/pip install --no-cache-dir --no-deps /src \
-    && /opt/lazyios/bin/pip install --no-cache-dir textual
+    && /opt/lazyios/bin/pip install --no-cache-dir "textual>=8.2,<9"
 
 ENV PATH="/opt/lazyios/bin:${PATH}" \
     COLORTERM=truecolor

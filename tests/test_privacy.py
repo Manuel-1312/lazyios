@@ -343,6 +343,15 @@ def test_summary_counts_and_reset():
     assert agg.summary() == (0, 0, 0) and agg.rows() == []
 
 
+def test_empty_report_needs_no_timestamps(tmp_path):
+    from lazyios.privacy import write_report
+
+    # headers come from the rows: formatting a dummy epoch 0 raises OSError on Windows west of UTC
+    json_path, csv_path = write_report([], tmp_path)
+    assert csv_path.read_text(encoding="utf-8").strip() == ""
+    assert '"rows": []' in json_path.read_text(encoding="utf-8")
+
+
 def test_csv_cells(tmp_path):
     from lazyios.privacy import HostRow, write_report
 
@@ -373,3 +382,35 @@ def test_aggregator_ignores_junk_packets():
     ):
         agg.feed(p)
     assert [r.domain for r in agg.rows()] == ["5.6.7.8"]  # the junk payload is just ignored
+
+
+def test_rows_say_how_the_name_was_learned():
+    agg = HostAggregator(DB)
+    agg.feed(answer("www.fine.org", "203.0.113.6"))
+    agg.feed(pkt("A", 1, dst="203.0.113.6:443"))
+    agg.feed(pkt("B", 2, payload=_client_hello("api.fine.org")))
+    agg.feed(pkt("C", 3, dst="198.51.100.1:443"))
+    sources = {r.process: (r.domain, r.source) for r in agg.rows()}
+    assert sources["A"] == ("www.fine.org", "dns")
+    assert sources["B"] == ("api.fine.org", "sni")
+    assert sources["C"] == ("198.51.100.1", "ip")
+
+
+def test_a_late_dns_answer_renames_bare_rows():
+    agg = HostAggregator(DB)
+    agg.feed(pkt("A", 1, length=10))
+    agg.feed(pkt("B", 2, length=20))
+    assert {r.domain for r in agg.rows()} == {"203.0.113.5"}
+    agg.feed(answer("sdk.tracker.net", "203.0.113.5"))
+    rows = {r.process: r for r in agg.rows()}
+    assert (rows["A"].domain, rows["A"].source, rows["A"].bytes) == ("sdk.tracker.net", "dns", 10)
+    assert rows["B"].tracker and rows["B"].bytes == 20
+    assert "203.0.113.5" not in agg._bare  # only the resolver's own address stays bare
+
+
+def test_bare_index_follows_evictions(monkeypatch):
+    monkeypatch.setattr(privacy, "MAX_ROWS", 3)
+    agg = HostAggregator(DB)
+    for i in range(10):
+        agg.feed(pkt(dst=f"198.51.100.{i + 1}:443"))
+    assert sum(len(apps) for apps in agg._bare.values()) == 3

@@ -16,6 +16,7 @@ def status_line(
     condition: Condition | None,
     tunnel: str = "off",
     capturing: bool = False,
+    activity: tuple[str, ...] = (),
 ) -> Text:
     text = Text(no_wrap=True, overflow="ellipsis")
 
@@ -31,6 +32,8 @@ def status_line(
         seg(f"ios {info.version} ({info.build})", GRAY)
     if capturing:
         seg("capture on", f"bold {ACID}")  # early, so a narrow terminal does not cut it
+    for what in activity:
+        seg(what, ACID)
     if battery is not None:
         level = f"bat {battery.percent}% {bar(battery.percent)}" + (
             " chrg" if battery.charging else ""
