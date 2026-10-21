@@ -2,20 +2,23 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 from collections import deque
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable, Coroutine, Iterable
 from contextlib import aclosing, suppress
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from textual.app import App, ComposeResult
+from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding
+from textual.screen import Screen
 from textual.widgets import Footer, Static, TabbedContent, TabPane
 from textual.worker import Worker
 
-from . import alerts, anomaly, sessions
+from . import alerts, anomaly, keys, sessions
+from .anonymize import Anonymizer
 from .backend import (
     Backend,
     BackendError,
@@ -25,9 +28,11 @@ from .backend import (
     Packet,
     Process,
 )
+from .diagnostics import log
+from .files import Scrub, prune
 from .flows import FlowTable
 from .parsing import clean_text
-from .privacy import KERNEL_PID, HostAggregator
+from .privacy import KERNEL_PID, HostAggregator, TrackerDB
 from .screens import DevicePicker, Help
 from .status import status_line
 from .tabs.apps import AppsTab
@@ -77,6 +82,17 @@ WORKER_STOP = 5.0
 DEV_OFF = "developer mode is off: enable it in settings > privacy & security"
 
 
+def explain(what: str, e: Exception) -> str:
+    """A short message for an unexpected error; the full one is in the diagnostic log."""
+    if isinstance(e, (TimeoutError, asyncio.TimeoutError)):
+        return f"{what} timed out: is the device unlocked and still plugged in?"
+    if isinstance(e, PermissionError):
+        return f"{what}: permission denied writing {e.filename or 'a file'}"
+    if isinstance(e, OSError):
+        return f"{what}: {e.strerror or type(e).__name__}"
+    return f"{what} failed ({type(e).__name__}), details in lazyios.log"
+
+
 def device_folder(udid: str) -> str:
     """Folder name for one device's files: its UDID, reduced to letters, digits and dashes."""
     safe = "".join(c for c in udid if c.isascii() and (c.isalnum() or c == "-"))[:64]
@@ -85,13 +101,13 @@ def device_folder(udid: str) -> str:
 
 class LazyiosApp(App[None]):
     CSS_PATH = "app.tcss"
-    ENABLE_COMMAND_PALETTE = False
+    ENABLE_COMMAND_PALETTE = True  # ctrl+p
     TITLE = "lazyios"
     BINDINGS = [
-        Binding("q", "quit", "quit"),
+        Binding("q", "quit", "quit", id="quit"),
         Binding("ctrl+c", "quit", "quit", show=False, priority=True),
-        Binding("question_mark", "help", "help"),
-        Binding("d", "devices", "devices"),
+        Binding("question_mark", "help", "help", id="help"),
+        Binding("d", "devices", "devices", id="devices"),
         *(
             Binding(str(n % 10), f"tab({n})", name, show=False)
             for n, (name, _) in enumerate(TABS, 1)
@@ -105,8 +121,13 @@ class LazyiosApp(App[None]):
         max_capture: int = MAX_CAPTURE_MB * MB,
         keep_sessions: int = sessions.KEEP,
         make_backend: Callable[[str], Backend] | None = None,
+        keep_files: int = 0,
+        anonymize: frozenset[str] = frozenset(),
     ) -> None:
         super().__init__()
+        self.keep_files = keep_files  # per device and kind; 0 keeps everything
+        self.anonymize = anonymize  # kinds of values pseudonymized in exports
+        self._anon_key = os.urandom(32)  # one key per run: pseudonyms match across its reports
         self.backend = backend
         self.make_backend = make_backend  # a backend for another device, to switch to it
         self.known_devices: set[str] | None = None  # UDIDs usbmuxd listed last time
@@ -157,7 +178,10 @@ class LazyiosApp(App[None]):
         self.set_interval(DEVICE_POLL, self.poll_devices)
         self.rules, problem = alerts.load(self.out_dir)
         self.thresholds, trouble = anomaly.load(self.out_dir)
-        for title, text in (("alerts", problem), ("anomaly", trouble)):
+        keymap, bad_keys = keys.load(self.out_dir)
+        if keymap:
+            self.set_keymap(keymap)
+        for title, text in (("alerts", problem), ("anomaly", trouble), ("keys", bad_keys)):
             if text:
                 self.notify(text, title=title, severity="warning", timeout=10, markup=False)
 
@@ -184,7 +208,8 @@ class LazyiosApp(App[None]):
         except BackendError as e:
             self.report(e)
         except Exception as e:  # keep tracebacks and library internals off the screen
-            self.report(BackendError(f"{group.split('-')[0]} failed: {type(e).__name__}"))
+            log.exception("%s failed", group)  # the traceback goes to the diagnostic log
+            self.report(BackendError(explain(group.split("-")[0], e)))
 
     def report(self, error: Exception) -> None:
         self.timeline.add("error", str(error))
@@ -223,6 +248,35 @@ class LazyiosApp(App[None]):
         """Where this device's captures, screenshots, reports and sessions go."""
         return self.out_dir / device_folder(self.info.udid if self.info else self.last_udid or "")
 
+    @property
+    def scrub(self) -> Scrub | None:
+        """The anonymizer for exports, or None when --anonymize was not given."""
+        if not self.anonymize:
+            return None
+        info = self.info
+        identifiers = [str(Path.home()), Path.home().name]
+        if info is not None:
+            identifiers += [info.name, info.serial, info.wifi_mac, info.udid]
+        trackers = TrackerDB()
+        return Anonymizer(
+            self.anonymize, lambda d: trackers.lookup(d) is not None, identifiers, self._anon_key
+        ).scrub
+
+    def saved(self, folder: Path, prefix: str) -> None:
+        """A file of this kind was just written: apply --keep-files."""
+        with suppress(OSError):
+            prune(folder, prefix, self.keep_files)
+
+    def activity(self) -> tuple[str, ...]:
+        running = []
+        if self.query_one(ProcessesTab).monitoring:
+            running.append("monitor")
+        if self.watching_processes:
+            running.append("watching processes")
+        if self.query_one(ToolsTab).fps_running:
+            running.append("fps")
+        return tuple(running)
+
     def update_status(self) -> None:
         self.query_one("#status", Static).update(
             status_line(
@@ -232,6 +286,7 @@ class LazyiosApp(App[None]):
                 self.backend.active_condition,
                 self.tunnel,
                 self.capturing,
+                self.activity(),
             )
         )
 
@@ -289,6 +344,7 @@ class LazyiosApp(App[None]):
             self.detector.session_end(self.aggregator.rows(), self.baseline)
             self.check_new_rows()
             self.timeline.add("capture", f"stopped after {count} packets", source="capture")
+            self.saved(path.parent, "capture")
             self._save_session()
             self.query_one(PrivacyTab).refresh_view(force=True)
             self.query_one(ConnsTab).refresh_view(force=True)
@@ -357,6 +413,7 @@ class LazyiosApp(App[None]):
             self.notify(message, severity="error", markup=False)
             return
         self.watching_processes = True
+        self.update_status()
         self.timeline.add("process", "watch started", source="dvt")
         before: dict[int, Process] | None = None
         try:
@@ -371,6 +428,7 @@ class LazyiosApp(App[None]):
                 await asyncio.sleep(PROCESS_POLL)
         finally:
             self.watching_processes = False
+            self.update_status()
             self.timeline.add("process", "watch stopped", source="dvt")
 
     def poll_devices(self) -> None:
@@ -477,4 +535,34 @@ class LazyiosApp(App[None]):
         self.query_one(TabbedContent).active = TABS[number - 1][0]
 
     def action_help(self) -> None:
-        self.push_screen(Help())
+        self.push_screen(Help(self.query_one(TabbedContent).active))
+
+    def get_system_commands(self, screen: Screen) -> Iterable[SystemCommand]:
+        """What ctrl+p offers: every tab and the main actions, by name."""
+        for n, (name, _) in enumerate(TABS, 1):
+            yield SystemCommand(f"go to {name}", f"tab {n % 10}", lambda n=n: self.action_tab(n))
+        tab_actions = (
+            ("start or stop the capture", "network", "toggle_capture"),
+            ("export the privacy report", "privacy", "export"),
+            ("export the connections", "conns", "export"),
+            ("export the privacy scores", "score", "export"),
+            ("export the timeline", "timeline", "export"),
+            ("watch process starts and exits", "timeline", "toggle_processes"),
+            ("live cpu and memory", "processes", "toggle_monitor"),
+            ("security audit", "overview", "audit"),
+            ("take a screenshot", "tools", "screenshot"),
+            ("clear the network condition", "network", "clear_condition"),
+            ("clear the simulated location", "tools", "clear_location"),
+            ("reconnect the syslog", "logs", "reconnect"),
+            ("how the privacy score works", "score", "criteria"),
+        )
+        for title, tab, action in tab_actions:
+            yield SystemCommand(title, f"in {tab}", lambda t=tab, a=action: self._tab_action(t, a))
+        yield SystemCommand("devices", "list them, switch to another", self.action_devices)
+        yield SystemCommand("help", "keys of every tab", self.action_help)
+        yield SystemCommand("quit", "clears condition and location first", self.exit)
+
+    def _tab_action(self, tab: str, action: str) -> None:
+        self.query_one(TabbedContent).active = tab
+        body = self.query_one(f"#{tab}-tab", TabBody)
+        self.call_later(getattr(body, f"action_{action}"))

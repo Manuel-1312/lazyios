@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from .backend import LogLine, Process
-from .files import write_tables
+from .files import Scrub, write_tables
 from .parsing import clean_text
 
 MAX_EVENTS = 20000
@@ -188,7 +188,11 @@ def report_rows(events: Iterable[Event]) -> list[dict[str, Any]]:
 
 
 def write_timeline(
-    events: list[Event], query: str, folder: Path, now: datetime | None = None
+    events: list[Event],
+    query: str,
+    folder: Path,
+    now: datetime | None = None,
+    scrub: Scrub | None = None,
 ) -> tuple[Path, Path, Path]:
     now = now or datetime.now()
     data = report_rows(events)
@@ -204,4 +208,5 @@ def write_timeline(
         document,
         header,
         (list(r.values()) for r in data),
+        scrub=scrub,
     )

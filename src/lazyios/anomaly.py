@@ -16,6 +16,7 @@ Background activity is not judged: no interface lazyios uses says whether an app
 from __future__ import annotations
 
 import json
+import math
 import statistics
 from collections import deque
 from dataclasses import dataclass, fields, replace
@@ -184,8 +185,8 @@ class Detector:
         if len(starts) < self.t.beacon_count:
             return
         gaps = [b - a for a, b in pairwise(starts)]
-        mean = statistics.fmean(gaps)
-        spread = statistics.pstdev(gaps)
+        mean = sum(gaps) / len(gaps)  # floats: statistics.pstdev is exact and far slower
+        spread = math.sqrt(sum((g - mean) ** 2 for g in gaps) / len(gaps))
         if mean < self.t.beacon_min_interval_s or spread > self.t.beacon_jitter * mean:
             return
         where = flow.name or flow.remote

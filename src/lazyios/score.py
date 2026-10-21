@@ -19,7 +19,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .files import write_tables
+from .files import Scrub, write_tables
 from .privacy import HostRow
 from .sessions import Change
 
@@ -173,7 +173,7 @@ def report_rows(scores: Iterable[AppScore]) -> list[dict[str, Any]]:
 
 
 def write_scores(
-    scores: list[AppScore], folder: Path, now: datetime | None = None
+    scores: list[AppScore], folder: Path, now: datetime | None = None, scrub: Scrub | None = None
 ) -> tuple[Path, Path, Path]:
     now = now or datetime.now()
     data = report_rows(scores)
@@ -189,4 +189,5 @@ def write_scores(
         document,
         header,
         (["; ".join(v) if isinstance(v, list) else v for v in r.values()] for r in data),
+        scrub=scrub,
     )

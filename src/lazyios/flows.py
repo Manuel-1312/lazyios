@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from .backend import Packet
-from .files import write_tables
+from .files import Scrub, write_tables
 from .parsing import clean_text, split_endpoint
 from .privacy import KERNEL_PID, HostAggregator, remote_is_dst
 
@@ -220,7 +220,11 @@ def report_rows(rows: Iterable[Flow]) -> list[dict[str, Any]]:
 
 
 def write_flows(
-    table: FlowTable, rows: list[Flow], folder: Path, now: datetime | None = None
+    table: FlowTable,
+    rows: list[Flow],
+    folder: Path,
+    now: datetime | None = None,
+    scrub: Scrub | None = None,
 ) -> tuple[Path, Path, Path]:
     """connections-<stamp>.json, .csv and .sha256 in folder."""
     now = now or datetime.now()
@@ -241,4 +245,5 @@ def write_flows(
         document,
         header,
         (list(r.values()) for r in data),
+        scrub=scrub,
     )

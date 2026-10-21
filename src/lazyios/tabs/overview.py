@@ -21,7 +21,10 @@ def _row(label: str, value: str, style: str = BONE) -> Text:
 
 class OverviewTab(TabBody):
     title = "overview"
-    BINDINGS = [Binding("r", "reload", "refresh"), Binding("a", "audit", "security audit")]
+    BINDINGS = [
+        Binding("r", "reload", "refresh", id="refresh"),
+        Binding("a", "audit", "security audit", id="audit"),
+    ]
     can_focus = True
 
     def compose(self) -> ComposeResult:
@@ -46,7 +49,9 @@ class OverviewTab(TabBody):
             return
         checks = assess(await app.backend.audit_facts())
         device = f"{app.info.product_type} {app.info.udid}"
-        app.push_screen(AuditScreen(checks, device, app.device_dir / "reports"))
+        app.push_screen(
+            AuditScreen(checks, device, app.device_dir / "reports", app.scrub, app.saved)
+        )
 
     def _logo(self) -> Text:
         if self.size.width >= LOGO_WIDTH + 2 and self.size.height >= LOGO_HEIGHT + 19:

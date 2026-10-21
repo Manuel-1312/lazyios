@@ -41,12 +41,12 @@ class ConnsTab(ReportOpener, TableTab[Flow]):
         ("idle", True),
     )
     BINDINGS = [
-        Binding("slash", "focus_filter", "filter"),
-        Binding("space", "toggle_capture", "capture"),
-        Binding("s", "cycle_sort", "sort"),
-        Binding("n", "toggle_new", "new only"),
-        Binding("e", "export", "export"),
-        Binding("o", "open_report", "open"),
+        Binding("slash", "focus_filter", "filter", id="filter"),
+        Binding("space", "toggle_capture", "capture", id="capture"),
+        Binding("s", "cycle_sort", "sort", id="sort"),
+        Binding("n", "toggle_new", "new only", id="new-only"),
+        Binding("e", "export", "export", id="export"),
+        Binding("o", "open_report", "open", id="open"),
         Binding("escape", "focus_table", show=False),
     ]
 
@@ -182,9 +182,12 @@ class ConnsTab(ReportOpener, TableTab[Flow]):
             self.app.notify("nothing to export yet", severity="warning")
             return
         try:
-            json_path, csv_path, _ = write_flows(flows, rows, self.lazy.device_dir / "reports")
+            json_path, csv_path, _ = write_flows(
+                flows, rows, self.lazy.device_dir / "reports", scrub=self.lazy.scrub
+            )
         except OSError as e:
             self.app.notify(f"cannot write report: {e}", severity="error", markup=False)
             return
         self.last_report = csv_path
+        self.lazy.saved(csv_path.parent, "connections")
         self.app.notify(f"saved {json_path} (+ .csv, .sha256), o to open", markup=False)

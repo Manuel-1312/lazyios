@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from .backend import AuditFacts
-from .files import write_tables
+from .files import Scrub, write_tables
 
 SEVERITIES = ("high", "medium", "low", "info")
 _BETA_BUILD = re.compile(r"^\d+[A-Z]\d+[a-z]$")  # seed builds end in a lowercase letter
@@ -165,7 +165,11 @@ def report_rows(checks: list[Check]) -> list[dict[str, Any]]:
 
 
 def write_audit(
-    checks: list[Check], device: str, folder: Path, now: datetime | None = None
+    checks: list[Check],
+    device: str,
+    folder: Path,
+    now: datetime | None = None,
+    scrub: Scrub | None = None,
 ) -> tuple[Path, Path, Path]:
     now = now or datetime.now()
     data = report_rows(checks)
@@ -181,4 +185,5 @@ def write_audit(
         document,
         list(data[0]) if data else [],
         (list(r.values()) for r in data),
+        scrub=scrub,
     )

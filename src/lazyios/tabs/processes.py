@@ -33,9 +33,9 @@ class ProcessesTab(TableTab[Process]):
     )
     BINDINGS = [
         *TableTab.BINDINGS,
-        Binding("k", "kill", "kill"),
-        Binding("l", "launch", "launch"),
-        Binding("m", "toggle_monitor", "cpu/mem"),
+        Binding("k", "kill", "kill", id="kill"),
+        Binding("l", "launch", "launch", id="launch"),
+        Binding("m", "toggle_monitor", "cpu/mem", id="monitor"),
     ]
 
     def __init__(self, **kwargs: Any) -> None:
@@ -106,6 +106,7 @@ class ProcessesTab(TableTab[Process]):
             self.notice(message)
             return
         self.monitoring = True
+        self.lazy.update_status()
         self.max_shown = MONITOR_ROWS
         self.query_one("#cpu-spark").display = True
         try:
@@ -116,6 +117,7 @@ class ProcessesTab(TableTab[Process]):
             self.lazy.report(e)
         finally:
             self.monitoring = False
+            self.lazy.update_status()
             self.max_shown = None
             self.query_one("#cpu-spark").display = False
             self.query_one("#perf", Static).update(Text("monitor stopped :: m to start", style=DIM))

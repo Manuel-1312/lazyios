@@ -58,7 +58,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install . pyinstaller
+      # exact versions from uv.lock, each checked against its hash
+      - run: pip install uv==0.12.23
+      - run: uv export --frozen --no-dev --extra build --no-emit-project -o locked.txt
+      - run: pip install --require-hashes -r locked.txt
+      - run: pip install --no-deps .
       - run: pyinstaller packaging/lazyios.spec --noconfirm
       - run: cp ${{ matrix.built }} ${{ matrix.asset }}
         shell: bash

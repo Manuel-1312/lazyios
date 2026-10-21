@@ -9,8 +9,11 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from . import __version__
+from .anonymize import parse_kinds
 from .app import MAX_CAPTURE_MB, MB, LazyiosApp
 from .backend import Backend
+from .diagnostics import LEVELS
+from .diagnostics import setup as setup_logging
 from .sessions import KEEP
 
 CLOSE_TIMEOUT = 5
@@ -20,6 +23,13 @@ def _count(value: str, least: int = 0) -> int:
     if not (value.isascii() and value.isdigit()) or int(value) < least:
         raise argparse.ArgumentTypeError(f"must be a whole number of {least} or more")
     return int(value)
+
+
+def _kinds(value: str) -> frozenset[str]:
+    try:
+        return parse_kinds(value)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(str(e)) from None
 
 
 def _positive(value: str) -> int:
@@ -50,6 +60,27 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=KEEP,
         metavar="N",
         help=f"session history files kept for comparisons, 0 keeps none (default: {KEEP})",
+    )
+    parser.add_argument(
+        "--keep-files",
+        type=_count,
+        default=0,
+        metavar="N",
+        help="per device, keep only the N newest captures, screenshots and reports of each kind;"
+        " older ones are deleted (default: 0, keep everything)",
+    )
+    parser.add_argument(
+        "--anonymize",
+        type=_kinds,
+        default=frozenset(),
+        metavar="KINDS",
+        help="pseudonymize exported reports: ips, domains (known trackers stay), ids, or all",
+    )
+    parser.add_argument(
+        "--log-level",
+        choices=LEVELS,
+        default="warning",
+        help="diagnostic log <out>/lazyios.log (default: warning)",
     )
     parser.add_argument("--version", action="version", version=f"lazyios {__version__}")
     parser.add_argument("--selftest", action="store_true", help="boot the demo headless and exit")
@@ -99,6 +130,12 @@ def main(argv: Sequence[str] | None = None) -> None:
     args = parse_args(argv)
     if args.selftest:
         sys.exit(selftest())
+    if args.out.exists() and not args.out.is_dir():
+        sys.exit(f"lazyios: --out {args.out} exists and is not a folder")
+    try:
+        setup_logging(args.out, args.log_level)
+    except OSError as e:
+        sys.exit(f"lazyios: cannot write to {args.out}: {e.strerror or e}")
     backend = make_backend(args)
     try:
         with contextlib.suppress(KeyboardInterrupt):
@@ -108,6 +145,8 @@ def main(argv: Sequence[str] | None = None) -> None:
                 args.max_capture_mb * MB,
                 args.keep_sessions,
                 make_backend=lambda udid: make_backend(args, udid),
+                keep_files=args.keep_files,
+                anonymize=args.anonymize,
             ).run()
     finally:
         if not backend.closed:  # the app's own shutdown did not run

@@ -32,11 +32,11 @@ class ToolsTab(TabBody):
     title = "tools"
     can_focus = True
     BINDINGS = [
-        Binding("s", "screenshot", "screenshot"),
-        Binding("o", "open_screenshot", "open"),
-        Binding("l", "edit_location", "coords"),
-        Binding("x", "clear_location", "clear loc"),
-        Binding("f", "toggle_fps", "fps"),
+        Binding("s", "screenshot", "screenshot", id="screenshot"),
+        Binding("o", "open_screenshot", "open", id="open"),
+        Binding("l", "edit_location", "coords", id="coords"),
+        Binding("x", "clear_location", "clear loc", id="clear-location"),
+        Binding("f", "toggle_fps", "fps", id="fps"),
         Binding("escape", "focus_self", show=False),
     ]
 
@@ -96,6 +96,7 @@ class ToolsTab(TabBody):
             self.app.notify(f"cannot save screenshot: {e}", severity="error", markup=False)
             return
         self.last_shot = path
+        self.lazy.saved(path.parent, "screenshot")
         self.query_one("#shot", Static).update(f"saved {path}   (o open)")
 
     def action_open_screenshot(self) -> None:
@@ -166,6 +167,7 @@ class ToolsTab(TabBody):
         if not await self._ready():
             return
         self.fps_running = True
+        self.lazy.update_status()
         info = self.query_one("#fpsinfo", Static)
         spark = self.query_one("#spark", Sparkline)
         try:
@@ -178,4 +180,5 @@ class ToolsTab(TabBody):
             self.lazy.report(e)
         finally:
             self.fps_running = False
+            self.lazy.update_status()
             info.update("stopped   (f start)")

@@ -46,17 +46,21 @@ class NetworkTab(TabBody):
     title = "network"
     focus_id = "#conditions"
     BINDINGS = [
-        Binding("space", "toggle_capture", "capture"),
-        Binding("o", "open_capture", "open"),
-        Binding("x", "clear_condition", "clear cond"),
-        Binding("r", "reload", "refresh"),
+        Binding("space", "toggle_capture", "capture", id="capture"),
+        Binding("o", "open_capture", "open", id="open"),
+        Binding("x", "clear_condition", "clear cond", id="clear-condition"),
+        Binding("r", "reload", "refresh", id="refresh"),
+        Binding("left_square_bracket", "resize(-2)", "smaller", id="shrink", show=False),
+        Binding("right_square_bracket", "resize(2)", "bigger", id="grow", show=False),
     ]
+    CONDITIONS_HEIGHT = (5, 30)  # rows the conditions pane may take
 
     def __init__(self, **kwargs: object) -> None:
         super().__init__(**kwargs)
         self.count = 0
         self.keys: deque[int] = deque()
         self.conditions: list[Condition] = []
+        self.conditions_height = 9  # rows, as in app.tcss
 
     @property
     def capturing(self) -> bool:
@@ -156,6 +160,12 @@ class NetworkTab(TabBody):
         self.render_conditions()
         self.reset()
         self.notice("")
+
+    def action_resize(self, step: int) -> None:
+        """Panes cannot be dragged in a terminal: [ and ] move the split instead."""
+        low, high = self.CONDITIONS_HEIGHT
+        self.conditions_height = max(low, min(high, self.conditions_height + step))
+        self.query_one("#conditions", DataTable).styles.height = self.conditions_height
 
     def action_reload(self) -> None:
         self.lazy.run_task(self.load(), group=f"load-{self.id}")

@@ -63,8 +63,8 @@ class TableTab(TabBody, Generic[T]):
     columns: ClassVar[tuple[tuple[str, bool], ...]] = ()
     max_shown: ClassVar[int | None] = None
     BINDINGS = [
-        Binding("slash", "focus_filter", "filter"),
-        Binding("r", "reload", "refresh"),
+        Binding("slash", "focus_filter", "filter", id="filter"),
+        Binding("r", "reload", "refresh", id="refresh"),
         Binding("escape", "focus_table", show=False),
     ]
 

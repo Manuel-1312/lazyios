@@ -91,9 +91,11 @@ async def test_log_buffer_is_bounded(tmp_path):
     app, _ = make(tmp_path)
     async with app.run_test(size=SIZE):
         logs = app.query_one(LogsTab)
-        for i in range(6000):
+        from lazyios.tabs.logs import BUFFER
+
+        for i in range(BUFFER + 1000):
             logs.add(logs.buffer[0] if logs.buffer else _line(i))
-        assert len(logs.buffer) == 5000
+        assert len(logs.buffer) == BUFFER
 
 
 def _line(i: int):
@@ -294,7 +296,7 @@ async def test_close_clears_location_when_condition_clear_hangs():
     assert backend.active_condition is not None
 
 
-def test_main_closes_backend_when_app_did_not(monkeypatch):
+def test_main_closes_backend_when_app_did_not(monkeypatch, tmp_path):
     import lazyios.__main__ as entry
 
     backend = FakeBackend(interval=0.01)
@@ -310,7 +312,7 @@ def test_main_closes_backend_when_app_did_not(monkeypatch):
     monkeypatch.setattr(entry, "make_backend", lambda args, udid=None: backend)
     monkeypatch.setattr(entry, "LazyiosApp", Dead)
     with pytest.raises(RuntimeError):
-        entry.main(["--demo"])
+        entry.main(["--demo", "--out", str(tmp_path)])
     assert backend.closed
 
 
@@ -973,3 +975,111 @@ async def test_plugged_devices_are_noticed_and_the_lost_one_reconnects(tmp_path)
         assert app.info is not None
         kinds = [e.summary.split(":")[0] for e in app.timeline.events() if e.kind == "device"]
         assert kinds.count("plugged in") == 2 and "unplugged" in kinds
+
+
+async def test_command_palette_lists_tabs_and_actions(tmp_path):
+    from textual.command import CommandPalette
+
+    app, _ = make(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        await until(pilot, lambda: app.info is not None)
+        titles = [c.title for c in app.get_system_commands(app.screen)]
+        assert "go to timeline" in titles and "security audit" in titles and "devices" in titles
+        await pilot.press("ctrl+p")
+        await until(pilot, lambda: isinstance(app.screen, CommandPalette))
+        await pilot.press("escape")
+        app._tab_action("privacy", "toggle_trackers")
+        await pilot.pause(0.1)
+        assert app.query_one(TabbedContent).active == "privacy"
+        assert app.query_one(PrivacyTab).trackers_only
+
+
+async def test_keys_file_rebinds_actions(tmp_path):
+    (tmp_path / "keys.json").write_text('{"capture": "c"}', encoding="utf-8")
+    app, _ = make(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        await until(pilot, lambda: app.info is not None)
+        await pilot.press("5", "c")
+        await until(pilot, lambda: app.capturing)
+        await pilot.press("c")
+        await until(pilot, lambda: not app.capturing)
+
+
+async def test_contextual_help_and_activity_in_the_status(tmp_path):
+    app, _ = make(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        await until(pilot, lambda: app.info is not None)
+        await pilot.press("2", "question_mark")
+        await pilot.pause()
+        text = "\n".join(str(s.content) for s in app.screen.query(Static))
+        assert "keys :: logs" in text and text.index(" logs ") < text.index(" global")
+        await pilot.press("escape", "3", "m")
+        await until(pilot, lambda: "monitor" in text_of(app, "#status"))
+        await pilot.press("m")
+        await until(pilot, lambda: "monitor" not in text_of(app, "#status"))
+
+
+async def test_logs_level_filter_and_pane_resize(tmp_path):
+    app, _ = make(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.press("2")
+        logs = app.query_one(LogsTab)
+        await until(pilot, lambda: len(logs.buffer) > 200)
+        for _ in range(3):
+            await pilot.press("v")
+        assert logs.level == "error" and "[error and up]" in str(
+            logs.query_one(".head", Static).content
+        )
+        await pilot.pause(0.3)
+        assert all(line.text.split()[2] in ("error", "fault")
+                   for line in logs.query_one(RichLog).lines if line.text.strip())  # fmt: skip
+        await pilot.press("5")
+        conditions = app.query_one(NetworkTab).query_one("#conditions", DataTable)
+        await pilot.press("right_square_bracket", "right_square_bracket")
+        assert conditions.styles.height.value == 13
+        for _ in range(20):
+            await pilot.press("left_square_bracket")
+        assert conditions.styles.height.value == 5
+
+
+async def test_anonymized_exports_and_kept_files(tmp_path):
+    backend = FakeBackend(interval=0.01)
+    app = LazyiosApp(backend, tmp_path, anonymize=frozenset({"ips", "domains", "ids"}),
+                     keep_files=1)  # fmt: skip
+    async with app.run_test(size=SIZE) as pilot:
+        await demo_capture(app, pilot, "8", rows=15)
+        await pilot.press("e")
+        reports = tmp_path / DEMO / "reports"
+        await until(pilot, lambda: list(reports.glob("connections-*.json")))
+        text = next(reports.glob("connections-*.json")).read_text(encoding="utf-8")
+        assert "203.0.113." not in text and "192.168.0.204" not in text
+        assert "fittrack.example" not in text  # first-party names are hidden
+        assert "doubleclick.net" in text or "app-measurement.com" in text  # trackers stay
+        await pilot.press("6", "s")
+        shots = tmp_path / DEMO / "screenshots"
+        await until(pilot, lambda: len(list(shots.glob("*.png"))) == 1)
+        await pilot.press("s")
+        await pilot.pause(0.5)
+        assert len(list(shots.glob("*.png"))) == 1  # --keep-files 1
+
+
+def test_explain_unexpected_errors():
+    from lazyios.app import explain
+
+    assert "timed out" in explain("launch", TimeoutError())
+    assert "permission denied writing /x" in explain("shot", PermissionError(13, "no", "/x"))
+    assert explain("capture", KeyError("k")).endswith("details in lazyios.log")
+
+
+def test_new_cli_flags(tmp_path):
+    from lazyios.__main__ import main, parse_args
+
+    args = parse_args(["--anonymize", "all", "--keep-files", "3", "--log-level", "debug"])
+    assert args.anonymize == {"ips", "domains", "ids"} and args.keep_files == 3
+    for bad in (["--anonymize", "emails"], ["--keep-files", "-2"], ["--log-level", "loud"]):
+        with pytest.raises(SystemExit):
+            parse_args(bad)
+    not_a_folder = tmp_path / "file"
+    not_a_folder.write_text("x")
+    with pytest.raises(SystemExit, match="is not a folder"):
+        main(["--demo", "--out", str(not_a_folder)])

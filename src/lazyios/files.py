@@ -37,6 +37,21 @@ def write_private(path: Path, data: bytes) -> Path:
     return path
 
 
+def prune(folder: Path, prefix: str, keep: int) -> int:
+    """Delete all but the `keep` newest <prefix>-<stamp>.* groups in folder (a report's .json,
+    .csv and .sha256 count as one); keep 0 keeps everything. Returns how many files went."""
+    if keep <= 0 or not folder.is_dir():
+        return 0
+    stems = sorted({p.name.split(".", 1)[0] for p in folder.glob(f"{prefix}-*") if p.is_file()})
+    removed = 0
+    for stem in stems[: max(0, len(stems) - keep)]:
+        for p in folder.glob(f"{stem}.*"):
+            if p.is_file() and not p.is_symlink():
+                p.unlink(missing_ok=True)
+                removed += 1
+    return removed
+
+
 def read_config(
     path: Path, parse: Callable[[str], T], default: T, max_file: int = 64 * 1024
 ) -> tuple[T, str | None]:
@@ -66,10 +81,21 @@ def write_sums(paths: Sequence[Path], sums: Path) -> Path:
     return write_private(sums, "".join(lines).encode())
 
 
+Scrub = Callable[[Any], Any]
+
+
 def write_tables(
-    base: Path, document: dict[str, Any], header: Sequence[str], rows: Iterable[Sequence[Any]]
+    base: Path,
+    document: dict[str, Any],
+    header: Sequence[str],
+    rows: Iterable[Sequence[Any]],
+    scrub: Scrub | None = None,
 ) -> tuple[Path, Path, Path]:
-    """base.json (the document), base.csv (header + rows) and base.sha256 over both."""
+    """base.json (the document), base.csv (header + rows) and base.sha256 over both. scrub,
+    when given, rewrites every string first (anonymization)."""
+    if scrub is not None:
+        document = scrub(document)
+        rows = (scrub(list(row)) for row in rows)
     json_path, csv_path = base.with_suffix(".json"), base.with_suffix(".csv")
     write_private(json_path, (json.dumps(document, indent=2) + "\n").encode())
     with io.TextIOWrapper(create_private(csv_path), encoding="utf-8", newline="") as out:

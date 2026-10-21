@@ -59,12 +59,12 @@ class PrivacyTab(ReportOpener, TableTab[HostRow]):
         ("last", True),
     )
     BINDINGS = [
-        Binding("slash", "focus_filter", "filter"),
-        Binding("space", "toggle_capture", "capture"),
-        Binding("s", "cycle_sort", "sort"),
-        Binding("t", "toggle_trackers", "trackers"),
-        Binding("e", "export", "export"),
-        Binding("o", "open_report", "open"),
+        Binding("slash", "focus_filter", "filter", id="filter"),
+        Binding("space", "toggle_capture", "capture", id="capture"),
+        Binding("s", "cycle_sort", "sort", id="sort"),
+        Binding("t", "toggle_trackers", "trackers", id="trackers"),
+        Binding("e", "export", "export", id="export"),
+        Binding("o", "open_report", "open", id="open"),
         Binding("escape", "focus_table", show=False),
     ]
 
@@ -192,9 +192,12 @@ class PrivacyTab(ReportOpener, TableTab[HostRow]):
             self.app.notify("nothing to export yet", severity="warning")
             return
         try:
-            json_path, csv_path = write_report(rows, self.lazy.device_dir / "reports")
+            json_path, csv_path = write_report(
+                rows, self.lazy.device_dir / "reports", scrub=self.lazy.scrub
+            )
         except OSError as e:
             self.app.notify(f"cannot write report: {e}", severity="error", markup=False)
             return
         self.last_report = csv_path
+        self.lazy.saved(csv_path.parent, "privacy")
         self.app.notify(f"report saved: {json_path} (+ .csv), o to open", markup=False)

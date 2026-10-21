@@ -83,7 +83,8 @@ Use Python 3.12: on newer versions a few pymobiledevice3 dependencies have no pr
 ## Usage
 
 ```
-lazyios [--udid UDID] [--out DIR] [--max-capture-mb MB] [--keep-sessions N] [--demo]
+lazyios [--udid UDID] [--out DIR] [--max-capture-mb MB] [--keep-sessions N]
+        [--keep-files N] [--anonymize KINDS] [--log-level LEVEL] [--demo]
 lazyios --version
 lazyios --selftest
 python -m lazyios
@@ -95,6 +96,7 @@ Each device gets its own folder, named after its UDID: captures, screenshots, re
 | --- | --- |
 | `1`-`9`, `0` | switch tab |
 | `q` | quit |
+| `ctrl+p` | command palette: every tab and action by name |
 | `d` | devices: list them, switch to another |
 | `?` | help |
 | `/` | focus filter (`esc` to leave) |
@@ -102,6 +104,8 @@ Each device gets its own folder, named after its UDID: captures, screenshots, re
 | `a` | overview: security audit (`e` exports it) |
 | `m` | processes: live CPU and memory |
 | `p` / `c` / `r` | logs: pause, clear, reconnect now (it also reconnects by itself) |
+| `v` | logs: lowest level shown (all, notice, warning, error) |
+| `[` / `]` | network: smaller / bigger conditions pane |
 | `k` / `l` | processes: kill, launch by bundle id |
 | `enter` | apps: launch; network: apply condition; tools: set location |
 | `space` / `o` | network: start/stop capture, open it |
@@ -197,6 +201,28 @@ lazyios cannot see system files, so the audit never says a phone is or is not co
 **Launching an app does nothing.** The phone has to be unlocked.
 
 **"Microsoft Visual C++ 14.0 or greater is required" while installing.** pip picked a Python version that some dependencies have no prebuilt wheels for. Install with Python 3.12 (`uv tool install --python 3.12 ...`) or use the standalone binary.
+
+## Settings, retention and privacy of the files
+
+Optional files in `~/lazyios` (each is checked; a bad one is ignored as a whole and lazyios says
+why): `alerts.json` and `anomaly.json` (see above) and `keys.json` to change shortcuts by id,
+for example `{"capture": "c", "devices": "ctrl+d"}`. Ids: quit, help, devices, capture, filter,
+refresh, export, open, sort, kill, launch, monitor, audit, pause, clear, reconnect, trackers,
+new-only, criteria, watch-processes, screenshot, coords, fps, clear-condition, clear-location,
+grow, shrink, level.
+
+- `--keep-files N` keeps the N newest captures, screenshots and reports of each kind per
+  device and deletes older ones (default 0: keep everything). `--keep-sessions N` does the same
+  for session history (default 30).
+- `--anonymize ips,domains,ids` (or `all`) pseudonymizes exported reports: addresses, domain
+  names (known tracker domains stay, they are public and are the point of the report) and
+  identifiers such as the UDID, serial, device name and your home folder. The same value gets
+  the same pseudonym within one run, so reports still match each other, but a new run uses a
+  new key. The screen, the pcap captures and the session history are not changed.
+- `--log-level` sets what goes to `~/lazyios/lazyios.log` (default warning: unexpected errors
+  with their traceback). The log is owner-only and rotated (3 x 512 KB).
+- lazyios has no telemetry and makes no network requests of its own; everything stays on your
+  computer.
 
 ## How it compares
 

@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from .backend import Packet
-from .files import write_tables
+from .files import Scrub, write_tables
 from .parsing import clean_text, parse_dns_answers, parse_tls_sni, split_endpoint
 
 MAX_ROWS = 2000
@@ -257,7 +257,7 @@ def report_rows(rows: Iterable[HostRow]) -> list[dict[str, Any]]:
 
 
 def write_report(
-    rows: list[HostRow], folder: Path, now: datetime | None = None
+    rows: list[HostRow], folder: Path, now: datetime | None = None, scrub: Scrub | None = None
 ) -> tuple[Path, Path]:
     """Write privacy-<stamp>.json, .csv and .sha256 into folder; returns (json path, csv path)."""
     now = now or datetime.now()
@@ -270,5 +270,6 @@ def write_report(
         document,
         header,
         ([*list(r.values())[:-1], " ".join(r["ips"])] for r in data),
+        scrub=scrub,
     )
     return json_path, csv_path

@@ -12,11 +12,13 @@ from textual.widgets import Input, RichLog, Static
 
 from ..art import header
 from ..backend import BackendError, LogLine
-from ..parsing import matches_filter, parse_syslog_line
+from ..parsing import LEVELS, matches_filter, parse_syslog_line
 from ..theme import ACID, BONE, DIM, GRAY, RED
 from .base import TabBody
 
-BUFFER = 5000
+BUFFER = 20000  # ~25 s of a busy phone (it logs ~800 lines/s); filters search all
+SHOWN = 5000  # lines kept on screen
+STEPS = ("all", "notice", "warning", "error")  # v cycles the lowest level shown
 FLUSH = 0.2
 WHO_WIDTH = 22
 DEBOUNCE = 0.2
@@ -55,10 +57,11 @@ class LogsTab(TabBody):
     title = "logs"
     focus_id = "#log"
     BINDINGS = [
-        Binding("slash", "focus_filter", "filter"),
-        Binding("p", "pause", "pause"),
-        Binding("c", "clear", "clear"),
-        Binding("r", "reconnect", "reconnect"),
+        Binding("slash", "focus_filter", "filter", id="filter"),
+        Binding("p", "pause", "pause", id="pause"),
+        Binding("c", "clear", "clear", id="clear"),
+        Binding("r", "reconnect", "reconnect", id="reconnect"),
+        Binding("v", "cycle_level", "level", id="level"),
         Binding("escape", "focus_log", show=False),
     ]
 
@@ -67,13 +70,14 @@ class LogsTab(TabBody):
         self.buffer: deque[LogLine] = deque(maxlen=BUFFER)
         self.pending: list[LogLine] = []
         self.paused = False
+        self.level = STEPS[0]
         self._debounce: Timer | None = None
 
     def compose(self) -> ComposeResult:
         yield Static(header("logs"), classes="head")
         yield Input(placeholder="/ filter process or message", id="filter")
         yield Static("", classes="notice")
-        yield RichLog(id="log", max_lines=BUFFER, wrap=False, markup=False, highlight=False)
+        yield RichLog(id="log", max_lines=SHOWN, wrap=False, markup=False, highlight=False)
 
     def on_mount(self) -> None:
         self.query_one(".notice").display = False
@@ -112,17 +116,24 @@ class LogsTab(TabBody):
             self._loaded = True
             self.lazy.run_task(self.load(), group=f"load-{self.id}")
 
-    def _visible(self, line: LogLine) -> bool:
-        needle = self.query_one("#filter", Input).value
+    def _visible(self, line: LogLine, needle: str) -> bool:
+        if self.level != "all" and (
+            line.level not in LEVELS or LEVELS.index(line.level) < LEVELS.index(self.level)
+        ):
+            return False
         return matches_filter(needle, line.process, line.message, "" if line.level else line.raw)
+
+    def _needle(self) -> str:
+        return self.query_one("#filter", Input).value
 
     def flush(self) -> None:
         batch, self.pending = self.pending, []
         if self.paused:
             return
         log = self.query_one(RichLog)
+        needle = self._needle()
         for line in batch:
-            if self._visible(line):
+            if self._visible(line, needle):
                 log.write(render_line(line), scroll_end=False)
         if batch:
             log.scroll_end(animate=False)
@@ -131,8 +142,9 @@ class LogsTab(TabBody):
         self.pending = []
         log = self.query_one(RichLog)
         log.clear()
-        for line in self.buffer:
-            if self._visible(line):
+        needle = self._needle()
+        for line in list(self.buffer)[-SHOWN * 4 :]:  # enough to fill the screen when filtered
+            if self._visible(line, needle):
                 log.write(render_line(line), scroll_end=False)
         log.scroll_end(animate=False)
 
@@ -144,12 +156,23 @@ class LogsTab(TabBody):
     def on_input_submitted(self, event: Input.Submitted) -> None:
         self.action_focus_log()
 
+    def _update_head(self) -> None:
+        head = header("logs") + ("  [paused]" if self.paused else "")
+        if self.level != "all":
+            head += f"  [{self.level} and up]"
+        lit = self.paused or self.level != "all"
+        self.query_one(".head", Static).update(Text(head, style=ACID if lit else ""))
+
     def action_pause(self) -> None:
         self.paused = not self.paused
-        head = header("logs") + ("  [paused]" if self.paused else "")
-        self.query_one(".head", Static).update(Text(head, style=ACID if self.paused else ""))
+        self._update_head()
         if not self.paused:
             self.rerender()
+
+    def action_cycle_level(self) -> None:
+        self.level = STEPS[(STEPS.index(self.level) + 1) % len(STEPS)]
+        self._update_head()
+        self.rerender()
 
     def action_clear(self) -> None:
         self.buffer.clear()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 from rich.text import Text
@@ -14,9 +15,10 @@ from textual.widgets import Button, DataTable, Input, Static
 from .art import header
 from .audit import Check, summary, write_audit
 from .backend import DeviceSummary
+from .files import Scrub
 from .theme import ACID, BONE, DIM, GRAY, RED
 
-HELP = """\
+GLOBAL_HELP = """\
  global
    1-9, 0     switch tab
    q          quit (clears condition and location)
@@ -24,27 +26,52 @@ HELP = """\
    d          devices: pick another connected device
    /          focus the filter, esc to leave it
    r          refresh (logs: reconnect now)
-
+   ctrl+p     command palette: every action by name
+"""
+TAB_HELP = {
+    "overview": """\
  overview    a security audit (e to export it)
+""",
+    "logs": """\
  logs        p pause/resume   c clear   r reconnect
+             v lowest level shown: all, notice, warning, error
+""",
+    "processes": """\
  processes   k kill   l launch by bundle id   m live cpu and memory
+""",
+    "apps": """\
  apps        enter launch
+""",
+    "network": """\
  network     space start/stop capture   o open capture
              enter apply condition      x clear condition   r reload
+             [ ] smaller / bigger conditions pane
+""",
+    "tools": """\
  tools       s screenshot   o open it   l coordinates
              enter set location   x clear location   f fps
+""",
+    "privacy": """\
  privacy     space start/stop capture   s sort   t trackers only
              e export report   o open it   / filter
+""",
+    "conns": """\
  conns       space start/stop capture   s sort   n new destinations only
              e export (json, csv, sha256)   o open it
              / filter: words, or app: domain: ip: port:443 proto:udp
+""",
+    "score": """\
  score       privacy score per app, new domains vs earlier sessions
              s sort   c how the score works   e export   o open it
+""",
+    "timeline": """\
  timeline    device, capture, first contacts, syslog errors, conditions,
              alerts and anomalies, newest first   p watch processes
              / kind:app,anomaly app:x since:10:05 until:10:30 last:5m
              e export (what the filter shows)   o open it
-"""
+""",
+}
+HELP = GLOBAL_HELP + "\n" + "".join(TAB_HELP.values())
 
 
 class Confirm(ModalScreen[bool]):
@@ -109,8 +136,13 @@ class TextScreen(ModalScreen[None]):
 
 
 class Help(TextScreen):
-    def __init__(self) -> None:
-        super().__init__("keys", HELP)
+    """The current tab's keys first, then the global ones and the other tabs."""
+
+    def __init__(self, tab: str | None = None) -> None:
+        mine = TAB_HELP.get(tab or "", "")
+        rest = "".join(v for k, v in TAB_HELP.items() if k != tab)
+        text = (f"{mine}\n" if mine else "") + GLOBAL_HELP + "\n" + rest
+        super().__init__(f"keys :: {tab}" if mine else "keys", text)
 
 
 class DevicePicker(ModalScreen[str | None]):
@@ -185,11 +217,20 @@ class AuditScreen(ModalScreen[None]):
         Binding("e", "export", "export"),
     ]
 
-    def __init__(self, checks: list[Check], device: str, folder: Path) -> None:
+    def __init__(
+        self,
+        checks: list[Check],
+        device: str,
+        folder: Path,
+        scrub: Scrub | None = None,
+        saved: Callable[[Path, str], None] | None = None,
+    ) -> None:
         super().__init__()
         self.checks = checks
         self.device = device
         self.folder = folder
+        self.scrub = scrub  # anonymizes the export when set
+        self.saved = saved  # told about the written report (retention)
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog wide"):
@@ -199,8 +240,10 @@ class AuditScreen(ModalScreen[None]):
 
     def action_export(self) -> None:
         try:
-            json_path, _, _ = write_audit(self.checks, self.device, self.folder)
+            json_path, _, _ = write_audit(self.checks, self.device, self.folder, scrub=self.scrub)
         except OSError as e:
             self.app.notify(f"cannot write report: {e}", severity="error", markup=False)
             return
+        if self.saved is not None:
+            self.saved(self.folder, "audit")
         self.app.notify(f"saved {json_path} (+ .csv, .sha256)", markup=False)

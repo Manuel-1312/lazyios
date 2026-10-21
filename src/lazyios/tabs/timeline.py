@@ -28,11 +28,11 @@ class TimelineTab(ReportOpener, TableTab[Event]):
     max_shown = 1000
     columns = (("time", False), ("kind", False), ("app", False), ("what", False), ("n", True))
     BINDINGS = [
-        Binding("slash", "focus_filter", "filter"),
-        Binding("space", "toggle_capture", "capture"),
-        Binding("p", "toggle_processes", "processes"),
-        Binding("e", "export", "export"),
-        Binding("o", "open_report", "open"),
+        Binding("slash", "focus_filter", "filter", id="filter"),
+        Binding("space", "toggle_capture", "capture", id="capture"),
+        Binding("p", "toggle_processes", "processes", id="watch-processes"),
+        Binding("e", "export", "export", id="export"),
+        Binding("o", "open_report", "open", id="open"),
         Binding("escape", "focus_table", show=False),
     ]
 
@@ -163,10 +163,11 @@ class TimelineTab(ReportOpener, TableTab[Event]):
             return
         try:
             json_path, csv_path, _ = write_timeline(
-                events, needle, self.lazy.device_dir / "reports"
+                events, needle, self.lazy.device_dir / "reports", scrub=self.lazy.scrub
             )
         except OSError as e:
             self.app.notify(f"cannot write report: {e}", severity="error", markup=False)
             return
         self.last_report = csv_path
+        self.lazy.saved(csv_path.parent, "timeline")
         self.app.notify(f"saved {json_path} (+ .csv, .sha256), o to open", markup=False)

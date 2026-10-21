@@ -43,12 +43,12 @@ class ScoreTab(ReportOpener, TableTab[AppScore]):
         ("bytes", True),
     )
     BINDINGS = [
-        Binding("slash", "focus_filter", "filter"),
-        Binding("space", "toggle_capture", "capture"),
-        Binding("s", "cycle_sort", "sort"),
-        Binding("c", "criteria", "criteria"),
-        Binding("e", "export", "export"),
-        Binding("o", "open_report", "open"),
+        Binding("slash", "focus_filter", "filter", id="filter"),
+        Binding("space", "toggle_capture", "capture", id="capture"),
+        Binding("s", "cycle_sort", "sort", id="sort"),
+        Binding("c", "criteria", "criteria", id="criteria"),
+        Binding("e", "export", "export", id="export"),
+        Binding("o", "open_report", "open", id="open"),
         Binding("escape", "focus_table", show=False),
     ]
 
@@ -200,9 +200,12 @@ class ScoreTab(ReportOpener, TableTab[AppScore]):
             self.app.notify("nothing to export yet", severity="warning")
             return
         try:
-            json_path, csv_path, _ = write_scores(scored, self.lazy.device_dir / "reports")
+            json_path, csv_path, _ = write_scores(
+                scored, self.lazy.device_dir / "reports", scrub=self.lazy.scrub
+            )
         except OSError as e:
             self.app.notify(f"cannot write report: {e}", severity="error", markup=False)
             return
         self.last_report = csv_path
+        self.lazy.saved(csv_path.parent, "score")
         self.app.notify(f"saved {json_path} (+ .csv, .sha256), o to open", markup=False)

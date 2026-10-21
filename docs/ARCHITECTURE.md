@@ -16,6 +16,9 @@ alerts.py     alert rules from <out>/alerts.json (validated, defaults on any err
 timeline.py   bounded event list, syslog folding, process start/exit diff, time queries
 anomaly.py    spike, beacon, fanout and change rules with <out>/anomaly.json thresholds
 audit.py      security checks from AuditFacts: evidence, why, action; never a verdict
+anonymize.py  keyed pseudonyms for exports (--anonymize)
+keys.py       <out>/keys.json: binding id -> key, validated
+diagnostics.py <out>/lazyios.log, owner-only, rotated
 files.py      owner-only output files, JSON/CSV reports with a SHA-256 file
 app.py        Textual app: status line, workers, the one shared capture
 tabs/         one widget per tab; TableTab gives filter + refresh to list tabs
@@ -32,6 +35,15 @@ New features keep that split instead of a rewrite:
 - **acquisition**: new `Backend` methods, each with a `FakeBackend` twin.
 - **analysis**: pure modules fed by data types (`flows.py`, later `anomaly.py` for rules), unit
   tested without Textual.
+
+## Performance
+
+Synthetic traffic, 200k packets at 5000 packets/s, desktop CPU (`HostAggregator`, `FlowTable`
+and `Detector` together): about 96k packets/s, 3.4x the 0.2 code once two hot spots went
+(exact `statistics.pstdev` in the beacon rule, `clean_text` on every packet). With tables full
+(2000 privacy rows, 5000 connections) a per-second refresh costs 4-7 ms. Every buffer has a
+cap: 20000 syslog lines (5000 on screen), 20000 timeline events, 2000 privacy rows, 5000
+connections, 1000 packet rows.
 
 ## Names and confidence
 
