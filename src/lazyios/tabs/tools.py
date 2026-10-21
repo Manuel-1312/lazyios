@@ -90,7 +90,7 @@ class ToolsTab(TabBody):
         path = (
             self.lazy.out_dir / "screenshots" / f"screenshot-{time.strftime('%Y%m%d-%H%M%S')}.png"
         )
-        path.parent.mkdir(parents=True, exist_ok=True)
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         path.write_bytes(data)
         self.last_shot = path
         self.query_one("#shot", Static).update(f"saved {path}   (o open)")

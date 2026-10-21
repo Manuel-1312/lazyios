@@ -308,7 +308,7 @@ class DeviceBackend:
                         yield p
 
                 try:
-                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
                     with path.open("wb") as out:
                         writer = asyncio.create_task(service.write_to_pcap(out, tee()))
                         writer.add_done_callback(lambda _: queue.put_nowait(None))

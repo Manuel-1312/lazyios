@@ -230,7 +230,7 @@ def write_report(
 ) -> tuple[Path, Path]:
     """Write privacy-<stamp>.json and .csv into folder; returns (json path, csv path)."""
     now = now or datetime.now()
-    folder.mkdir(parents=True, exist_ok=True)
+    folder.mkdir(mode=0o700, parents=True, exist_ok=True)  # traffic metadata: owner only
     base = folder / f"privacy-{now.strftime('%Y%m%d-%H%M%S-%f')[:-3]}"
     data = report_rows(rows)
     summary = dict(zip(("apps", "domains", "trackers"), summarize(rows), strict=True))
