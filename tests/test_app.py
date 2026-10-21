@@ -50,8 +50,8 @@ async def test_tab_switching(tmp_path):
     async with app.run_test(size=SIZE) as pilot:
         tabs = app.query_one(TabbedContent)
         for key, name in zip(
-            "1234567",
-            ("overview", "logs", "processes", "apps", "network", "tools", "privacy"),
+            "12345678",
+            ("overview", "logs", "processes", "apps", "network", "tools", "privacy", "conns"),
             strict=True,
         ):
             await pilot.press(key)
@@ -589,3 +589,45 @@ async def test_screenshots_in_the_same_second_do_not_collide(tmp_path):
         await until(pilot, lambda: len(list((tmp_path / "screenshots").glob("*.png"))) == 1)
         await pilot.press("s")
         await until(pilot, lambda: len(list((tmp_path / "screenshots").glob("*.png"))) == 2)
+
+
+async def test_conns_tab_follows_the_capture_and_filters(tmp_path):
+    from lazyios.tabs.conns import ConnsTab
+
+    app, _ = make(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.press("8")
+        tab = app.query_one(ConnsTab)
+        table = tab.query_one("#table", DataTable)
+        assert "space" in str(tab.query_one(".notice", Static).content)
+        await pilot.press("space")
+        await until(pilot, lambda: table.row_count > 8, timeout=10)
+        assert any(f.source == "sni" for f in app.flows.rows())
+        assert any(f.new for f in app.flows.rows())
+        await pilot.press("space")
+        await until(pilot, lambda: not app.capturing)
+        await pilot.press("slash", *"proto:udp", "enter")
+        await pilot.pause(0.2)
+        shown = [f for f in tab.items if tab.matches(f, "proto:udp")]
+        assert 0 < table.row_count == len(shown) < len(tab.items)
+        await pilot.press("e")
+        await until(pilot, lambda: tab.last_report is not None)
+        names = sorted(p.suffix for p in (tmp_path / "reports").glob("connections-*"))
+        assert names == [".csv", ".json", ".sha256"]
+
+
+async def test_conns_new_only_toggle(tmp_path):
+    from lazyios.tabs.conns import ConnsTab
+
+    app, _ = make(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.press("8", "space")
+        await until(pilot, lambda: len(app.flows.rows()) > 20, timeout=15)
+        await pilot.press("space")
+        await until(pilot, lambda: not app.capturing)
+        tab = app.query_one(ConnsTab)
+        everything = tab.query_one("#table", DataTable).row_count
+        await pilot.press("n")
+        await pilot.pause(0.2)
+        assert all(tab.accepts(f) == f.new for f in tab.items)
+        assert tab.query_one("#table", DataTable).row_count <= everything

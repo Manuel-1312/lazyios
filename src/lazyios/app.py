@@ -13,11 +13,13 @@ from textual.widgets import Footer, Static, TabbedContent, TabPane
 from textual.worker import Worker
 
 from .backend import Backend, BackendError, Battery, DeviceInfo, DevModeOffError, Packet
+from .flows import FlowTable
 from .privacy import HostAggregator
 from .screens import Help
 from .status import status_line
 from .tabs.apps import AppsTab
 from .tabs.base import TabBody
+from .tabs.conns import ConnsTab
 from .tabs.logs import LogsTab
 from .tabs.network import NetworkTab
 from .tabs.overview import OverviewTab
@@ -34,6 +36,7 @@ TABS: list[tuple[str, type[TabBody]]] = [
     ("network", NetworkTab),
     ("tools", ToolsTab),
     ("privacy", PrivacyTab),
+    ("conns", ConnsTab),
 ]
 BATTERY_REFRESH = 30
 SHUTDOWN_TIMEOUT = 15
@@ -72,6 +75,7 @@ class LazyiosApp(App[None]):
         self.last_capture: Path | None = None
         self.pending: list[Packet] = []  # captured, not yet shown in the packet table
         self.aggregator = HostAggregator()
+        self.flows = FlowTable(self.aggregator)  # reads the names the aggregator learns
         self._capture_worker: Worker[None] | None = None
 
     def compose(self) -> ComposeResult:
@@ -158,6 +162,7 @@ class LazyiosApp(App[None]):
         self.capturing = True
         self.pending = []
         self.aggregator.reset()
+        self.flows.reset()
         self.query_one(NetworkTab).reset()
         self.update_status()
         self._capture_worker = self.run_task(self._capture(self.last_capture), group="capture")
@@ -169,6 +174,7 @@ class LazyiosApp(App[None]):
                 async for packet in packets:
                     self.pending.append(packet)
                     self.aggregator.feed(packet)
+                    self.flows.feed(packet)
                     size += PCAP_RECORD + packet.length
                     if size > self.max_capture:
                         self.notify(
@@ -185,6 +191,7 @@ class LazyiosApp(App[None]):
             self.update_status()
             self.query_one(NetworkTab).flush()
             self.query_one(PrivacyTab).refresh_view(force=True)
+            self.query_one(ConnsTab).refresh_view(force=True)
 
     async def open_dvt(self) -> str | None:
         """Open the tunnel if needed; returns a message when developer services are unavailable."""

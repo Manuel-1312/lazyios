@@ -109,6 +109,11 @@ RichLog {
     padding: 0 1;
 }
 
+#summary, #detail, #caveat {
+    height: 1;
+    padding: 0 1;
+}
+
 #packets {
     height: 1fr;
 }

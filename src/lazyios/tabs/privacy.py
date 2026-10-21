@@ -22,6 +22,7 @@ WIDE_FROM = 100
 CAVEAT = Text(
     "names: unauthenticated DNS + TLS SNI; DoH, ECH, QUIC, Relay show as bare IPs", style=DIM
 )
+VIA = {"sni": "sni", "dns": "dns", "ip": "-"}
 HINT = "press space to start a capture, then use your apps"
 
 
@@ -54,6 +55,7 @@ class PrivacyTab(TableTab[HostRow]):
         ("domain", False),
         ("category", False),
         ("company", False),
+        ("via", False),
         ("flows", True),
         ("bytes", True),
         ("last", True),
@@ -112,6 +114,7 @@ class PrivacyTab(TableTab[HostRow]):
             Text(fit(item.domain, domain), style=style),
             Text(item.category or "-", style=RED if item.tracker else GRAY),
             Text(fit(item.company or "-", company), style=style if item.company else GRAY),
+            Text(VIA[item.source], style=GRAY),
             Text(str(item.flows), style=style, justify="right"),
             Text(human_bytes(item.bytes), style=style, justify="right"),
             Text(age(self.lazy.aggregator.latest - item.last), style=GRAY, justify="right"),

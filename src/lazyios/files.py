@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import csv
+import hashlib
+import io
+import json
 import os
 import sys
+from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import BinaryIO
+from typing import Any, BinaryIO
 
 
 def private_dir(path: Path) -> Path:
@@ -28,3 +33,28 @@ def write_private(path: Path, data: bytes) -> Path:
     with create_private(path) as out:
         out.write(data)
     return path
+
+
+def csv_safe(value: Any) -> Any:
+    """Keep spreadsheets from reading a cell as a formula."""
+    return "'" + value if isinstance(value, str) and value.startswith(tuple("=+-@\t\r")) else value
+
+
+def write_sums(paths: Sequence[Path], sums: Path) -> Path:
+    """SHA-256 of each file in `sha256sum` format, so `sha256sum -c` (run in that folder)
+    tells whether a report changed after it was written."""
+    lines = (f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n" for p in paths)
+    return write_private(sums, "".join(lines).encode())
+
+
+def write_tables(
+    base: Path, document: dict[str, Any], header: Sequence[str], rows: Iterable[Sequence[Any]]
+) -> tuple[Path, Path, Path]:
+    """base.json (the document), base.csv (header + rows) and base.sha256 over both."""
+    json_path, csv_path = base.with_suffix(".json"), base.with_suffix(".csv")
+    write_private(json_path, (json.dumps(document, indent=2) + "\n").encode())
+    with io.TextIOWrapper(create_private(csv_path), encoding="utf-8", newline="") as out:
+        writer = csv.writer(out)
+        writer.writerow(header)
+        writer.writerows([csv_safe(v) for v in row] for row in rows)
+    return json_path, csv_path, write_sums([json_path, csv_path], base.with_suffix(".sha256"))

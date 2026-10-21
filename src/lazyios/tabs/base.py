@@ -54,6 +54,7 @@ class TableTab(TabBody, Generic[T]):
 
     focus_id = "#table"
     columns: ClassVar[tuple[tuple[str, bool], ...]] = ()
+    max_shown: ClassVar[int | None] = None
     BINDINGS = [
         Binding("slash", "focus_filter", "filter"),
         Binding("r", "reload", "refresh"),
@@ -76,6 +77,10 @@ class TableTab(TabBody, Generic[T]):
     def accepts(self, item: T) -> bool:
         """Extra per-tab row filter, applied together with the text filter."""
         return True
+
+    def matches(self, item: T, needle: str) -> bool:
+        """The text filter; tabs with a query syntax override it."""
+        return matches_filter(needle, *self.haystack(item))
 
     def compose(self) -> ComposeResult:
         yield Static(header(self.title), classes="head")
@@ -105,9 +110,9 @@ class TableTab(TabBody, Generic[T]):
         keep = self.selected()
         needle = self.query_one("#filter", Input).value
         table.clear()
-        shown = [
-            i for i in self.items if self.accepts(i) and matches_filter(needle, *self.haystack(i))
-        ]
+        shown = [i for i in self.items if self.accepts(i) and self.matches(i, needle)]
+        if self.max_shown is not None:  # keeps rebuilding the table cheap on long captures
+            shown = shown[: self.max_shown]
         for item in shown:
             table.add_row(*self.cells(item), key=self.key(item))
         if keep is not None:

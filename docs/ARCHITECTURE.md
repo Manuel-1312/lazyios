@@ -8,8 +8,9 @@ backend.py    data types + Backend protocol (the only thing the UI knows about a
 device.py     DeviceBackend over pymobiledevice3 (lockdown, pcapd, syslog, DVT over a userspace tunnel)
 fake.py       FakeBackend: canned data for --demo, --selftest and every UI test
 parsing.py    pure parsers: syslog, IPv4/IPv6, DNS answers, TLS SNI (fuzzed, bounded)
-privacy.py    HostAggregator: packets -> (app, domain) rows, tracker lookup, JSON/CSV report
-files.py      owner-only output files
+privacy.py    HostAggregator: packets -> (app, domain) rows, tracker lookup, DNS/SNI names
+flows.py      FlowTable: packets -> one row per connection, bytes each way, name confidence
+files.py      owner-only output files, JSON/CSV reports with a SHA-256 file
 app.py        Textual app: status line, workers, the one shared capture
 tabs/         one widget per tab; TableTab gives filter + refresh to list tabs
 ```
@@ -23,8 +24,23 @@ drive it in tests without an iPhone.
 New features keep that split instead of a rewrite:
 
 - **acquisition**: new `Backend` methods, each with a `FakeBackend` twin.
-- **analysis**: pure modules fed by data types (`flows.py` for connections, `anomaly.py` for
-  rules), unit tested without Textual.
+- **analysis**: pure modules fed by data types (`flows.py`, later `anomaly.py` for rules), unit
+  tested without Textual.
+
+## Names and confidence
+
+One capture feeds the packet table, `HostAggregator` and `FlowTable`, in that order. A domain is
+tied to an address in one of three ways, and every row and export says which:
+
+| source | confidence | meaning |
+| --- | --- | --- |
+| `sni` | high | the app sent this name in the TLS ClientHello of this connection |
+| `dns` | medium | a DNS answer for this address; CDN addresses serve many sites |
+| `ip` | none | no name seen (DoH, ECH, QUIC and Private Relay hide it) |
+
+SNI is never borrowed across apps. A DNS answer that arrives after the traffic renames the rows
+that only had the address. pktap sometimes leaves the pid off inbound packets; such a packet is
+counted for an app only when protocol and both endpoints match that app's connection.
 - **storage**: `files.py` for every file lazyios writes (permissions, no overwrite, size caps,
   SHA-256 sidecars).
 - **presentation**: tabs stay thin; bounded buffers everywhere (deque / capped dicts).
@@ -37,7 +53,7 @@ not in this table is not promised.
 | data | source | needs Developer Mode | verified |
 | --- | --- | --- | --- |
 | packets with pid + process name | `PcapdService` (lockdown) | no | yes |
-| connections with pid, rx/tx bytes, RTT | DVT `NetworkMonitor` | yes | yes (96 connections, 311 updates in 8 s) |
+| connections, rx/tx bytes, RTT | DVT `NetworkMonitor` | yes | yes, but **pid is -2 for every connection**, bytes are per-second deltas: no app attribution, so the inspector uses pcapd |
 | per-process CPU, memory (physFootprint, resident) | DVT `Sysmontap` | yes | yes (571 processes) |
 | FPS | DVT `Graphics` | yes | yes (existing tools tab) |
 | battery level, cycles, charger | `DiagnosticsService.get_battery` | no | yes |

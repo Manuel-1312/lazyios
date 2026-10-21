@@ -34,7 +34,8 @@ Tracker data: AdGuard companiesdb, [CC BY-SA 4.0](https://creativecommons.org/li
 - processes: list, filter, kill (with confirmation), launch by bundle id
 - apps: installed user apps, launch with enter
 - network: packet capture to a real `.pcap` with a live table, open in Wireshark; network, thermal and GPU conditions
-- privacy: which app talks to which domain, known trackers flagged, filter, sort, JSON and CSV export
+- privacy: which app talks to which domain, known trackers flagged, how each name was learned (TLS SNI, DNS or none), filter, sort, JSON and CSV export
+- conns: every connection from the capture with app, pid, endpoints, bytes up and down, new vs returning destinations, domain with a confidence level, `app:` `domain:` `ip:` `port:` `proto:` filters, JSON/CSV export with a SHA-256 file
 - tools: screenshot, location simulation, FPS sparkline
 - `--demo` runs on fake data, no device needed
 
@@ -88,7 +89,7 @@ Captures, screenshots and privacy reports go to `~/lazyios/captures`, `~/lazyios
 
 | key | action |
 | --- | --- |
-| `1`-`7` | switch tab |
+| `1`-`8` | switch tab |
 | `q` | quit |
 | `?` | help |
 | `/` | focus filter (`esc` to leave) |
@@ -97,9 +98,11 @@ Captures, screenshots and privacy reports go to `~/lazyios/captures`, `~/lazyios
 | `k` / `l` | processes: kill, launch by bundle id |
 | `enter` | apps: launch; network: apply condition; tools: set location |
 | `space` / `o` | network: start/stop capture, open it |
-| `space` | privacy: start/stop the same capture |
+| `space` | privacy, conns: start/stop the same capture |
 | `s` / `t` | privacy: cycle sort, trackers only |
-| `e` / `o` | privacy: export a report, open it |
+| `e` / `o` | privacy, conns: export a report, open it |
+| `n` | conns: new destinations only |
+| `s` | conns: cycle sort (last, bytes, app) |
 | `x` | clear condition (network) or location (tools) |
 | `s` / `o` | tools: screenshot, open it |
 | `l` / `f` | tools: edit coordinates, start/stop FPS |
@@ -126,6 +129,7 @@ libimobiledevice and `idevicesyslog` are single-purpose command line tools, and 
 
 ## Notes
 
+- Reports come with a `.sha256` file: run `sha256sum -c <report>.sha256` in the reports folder to check they were not changed.
 - Capture files and privacy reports contain your traffic metadata (domains, IPs). Treat them as sensitive. lazyios writes them owner-only (folders 0700, files 0600 on macOS and Linux) and never overwrites an existing file.
 - An active condition is shown in red in the status line. Conditions and simulated location are cleared when you quit.
 
