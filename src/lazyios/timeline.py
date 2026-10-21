@@ -37,6 +37,7 @@ class Event:
     detail: str = ""
     source: str = "lazyios"
     count: int = 1
+    seq: int = 0  # order of arrival: breaks ties, the clock ticks ~15 ms apart on Windows
 
 
 def iso(when: float) -> str:
@@ -46,6 +47,7 @@ def iso(when: float) -> str:
 class Timeline:
     def __init__(self) -> None:
         self.version = 0
+        self._seq = 0
         self._events: deque[Event] = deque(maxlen=MAX_EVENTS)
         self._open_syslog: dict[tuple[str, str], Event] = {}  # (process, level) -> event
 
@@ -61,7 +63,9 @@ class Timeline:
             clean_text(app),
             clean_text(detail, 500),
             source,
+            seq=self._seq,
         )
+        self._seq += 1
         self._events.append(event)
         self.version += 1
         return event

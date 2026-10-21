@@ -77,3 +77,11 @@ def test_export_has_offset_times_epoch_and_checksum(tmp_path):
     assert "'=x" in csv_path.read_text(encoding="utf-8")
     line = sums.read_text().splitlines()[0]
     assert line.startswith(hashlib.sha256(json_path.read_bytes()).hexdigest())
+
+
+def test_events_with_the_same_time_keep_their_order():
+    t = Timeline()
+    for name in ("a", "b", "c"):
+        t.add("capture", name, when=1.0)  # the Windows clock often gives equal times
+    newest = sorted(t.events(), key=lambda e: (e.time, e.seq), reverse=True)
+    assert [e.summary for e in newest] == ["c", "b", "a"]

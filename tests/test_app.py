@@ -68,8 +68,7 @@ async def test_tab_switching(tmp_path):
             strict=True,
         ):
             await pilot.press(key)
-            await pilot.pause()
-            assert tabs.active == name
+            await until(pilot, lambda name=name: tabs.active == name)
 
 
 async def test_logs_arrive_and_filter_narrows(tmp_path):
@@ -748,7 +747,7 @@ async def test_timeline_collects_device_capture_and_contacts(tmp_path):
         kinds = {e.kind for e in app.timeline.events()}
         assert {"device", "capture", "connection", "network"} <= kinds
         assert any(e.summary.startswith("first contact:") and e.app for e in app.timeline.events())
-        assert tab.items == sorted(tab.items, key=lambda e: e.time, reverse=True)
+        assert tab.items == sorted(tab.items, key=lambda e: (e.time, e.seq), reverse=True)
         await pilot.press("slash", *"kind:capture", "enter")
         table = tab.query_one("#table", DataTable)
         assert sum(e.kind == "capture" for e in app.timeline.events()) == 2

@@ -9,6 +9,7 @@ from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
+from textual.events import Resize
 from textual.widgets import DataTable, Input, Static
 
 from .. import opener
@@ -135,6 +136,10 @@ class TableTab(TabBody, Generic[T]):
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "filter":
+            self.render_rows()
+
+    def on_resize(self, event: Resize) -> None:
+        if self.items:  # some tabs size their columns to the width
             self.render_rows()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:

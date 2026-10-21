@@ -106,7 +106,8 @@ class TimelineTab(ReportOpener, TableTab[Event]):
         notice.display = empty
         if force or app.timeline.version != self._seen:
             self._seen = app.timeline.version
-            self.set_items(sorted(app.timeline.events(), key=lambda e: e.time, reverse=True))
+            newest = sorted(app.timeline.events(), key=lambda e: (e.time, e.seq), reverse=True)
+            self.set_items(newest)
             self.update_summary()
 
     def update_summary(self) -> None:
@@ -154,7 +155,8 @@ class TimelineTab(ReportOpener, TableTab[Event]):
         needle = self.query_one("#filter", Input).value
         query = parse_query(needle)
         events = sorted(
-            (e for e in self.lazy.timeline.events() if query.matches(e)), key=lambda e: e.time
+            (e for e in self.lazy.timeline.events() if query.matches(e)),
+            key=lambda e: (e.time, e.seq),
         )
         if not events:
             self.app.notify("nothing to export", severity="warning")
