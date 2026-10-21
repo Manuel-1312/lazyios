@@ -510,9 +510,10 @@ async def test_privacy_renders_hostile_names_literally(tmp_path):
             app.aggregator.feed(p)
         await pilot.press("7")
         tab.refresh_view(force=True)
-        await pilot.pause()
+        # drawn before the tab has its width, then again on the resize that follows
+        await until(pilot, lambda: ("[bold]App[31m", "203.0.113.5")
+                    in {row[:2] for row in privacy_rows(tab)})  # fmt: skip
         rows = privacy_rows(tab)
-        assert ("[bold]App[31m", "203.0.113.5") in {row[:2] for row in rows}
         assert all("evil" not in cell for row in rows for cell in row)
         table = tab.query_one("#table", DataTable)
         assert all(isinstance(c, Text) for i in range(table.row_count) for c in table.get_row_at(i))
@@ -1006,6 +1007,8 @@ async def test_keys_file_rebinds_actions(tmp_path):
 
 
 async def test_contextual_help_and_activity_in_the_status(tmp_path):
+    from lazyios.screens import Help
+
     app, _ = make(tmp_path)
     async with app.run_test(size=SIZE) as pilot:
         await until(pilot, lambda: app.info is not None)
@@ -1013,7 +1016,11 @@ async def test_contextual_help_and_activity_in_the_status(tmp_path):
         await pilot.pause()
         text = "\n".join(str(s.content) for s in app.screen.query(Static))
         assert "keys :: logs" in text and text.index(" logs ") < text.index(" global")
-        await pilot.press("escape", "3", "m")
+        await pilot.press("escape")
+        await until(pilot, lambda: not isinstance(app.screen, Help))
+        await pilot.press("3")
+        await until(pilot, lambda: app.query_one(TabbedContent).active == "processes")
+        await pilot.press("m")
         await until(pilot, lambda: "monitor" in text_of(app, "#status"))
         await pilot.press("m")
         await until(pilot, lambda: "monitor" not in text_of(app, "#status"))
