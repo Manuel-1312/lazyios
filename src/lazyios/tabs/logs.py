@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 from collections import deque
+from contextlib import aclosing
 
 from rich.text import Text
 from textual.app import ComposeResult
@@ -18,6 +20,7 @@ BUFFER = 5000
 FLUSH = 0.2
 WHO_WIDTH = 22
 DEBOUNCE = 0.2
+RETRY = (2.0, 5.0, 10.0, 30.0)  # seconds between reconnects, the last one repeats
 
 _SHORT = {"warning": "warn"}
 _LEVEL_STYLE = {
@@ -55,6 +58,7 @@ class LogsTab(TabBody):
         Binding("slash", "focus_filter", "filter"),
         Binding("p", "pause", "pause"),
         Binding("c", "clear", "clear"),
+        Binding("r", "reconnect", "reconnect"),
         Binding("escape", "focus_log", show=False),
     ]
 
@@ -76,12 +80,26 @@ class LogsTab(TabBody):
         self.set_interval(FLUSH, self.flush)
 
     async def load(self) -> None:
-        try:
-            async for raw in self.lazy.backend.syslog():
-                self.add(parse_syslog_line(raw))
-        except BackendError as e:
-            self.notice(str(e))
-            self.lazy.report(e)
+        """Follow syslog; when the stream drops (unplug, lock, relay restart) reconnect with
+        backoff. Only the first failure of a run pops a notification."""
+        failures = 0
+        while True:
+            try:
+                async with aclosing(self.lazy.backend.syslog()) as lines:
+                    async for raw in lines:
+                        if failures:
+                            failures = 0
+                            self.notice("")
+                        self.add(parse_syslog_line(raw))
+                problem = "syslog stream ended"
+            except BackendError as e:
+                if not failures:
+                    self.lazy.report(e)
+                problem = str(e)
+            delay = RETRY[min(failures, len(RETRY) - 1)]
+            failures += 1
+            self.notice(f"{problem} :: retrying in {delay:g}s (r now)")
+            await asyncio.sleep(delay)
 
     def add(self, line: LogLine) -> None:
         self.buffer.append(line)
@@ -130,6 +148,10 @@ class LogsTab(TabBody):
         self.buffer.clear()
         self.pending = []
         self.query_one(RichLog).clear()
+
+    def action_reconnect(self) -> None:
+        self.notice("")
+        self.lazy.run_task(self.load(), group=f"load-{self.id}")  # replaces the running stream
 
     def action_focus_filter(self) -> None:
         self.query_one("#filter", Input).focus()

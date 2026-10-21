@@ -49,6 +49,7 @@ class NetworkTab(TabBody):
         Binding("space", "toggle_capture", "capture"),
         Binding("o", "open_capture", "open"),
         Binding("x", "clear_condition", "clear cond"),
+        Binding("r", "reload", "refresh"),
     ]
 
     def __init__(self, **kwargs: object) -> None:
@@ -145,6 +146,9 @@ class NetworkTab(TabBody):
 
     def action_toggle_capture(self) -> None:
         self.lazy.toggle_capture()
+
+    def action_reload(self) -> None:
+        self.lazy.run_task(self.load(), group=f"load-{self.id}")
 
     def reset(self) -> None:
         self.count = 0

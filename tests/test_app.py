@@ -523,3 +523,69 @@ async def test_capture_is_shared_between_tabs(tmp_path):
         assert backend.captures == 2 and len(app.aggregator.rows()) <= before
         await pilot.press("space")
         await until(pilot, lambda: not app.capturing)
+
+
+async def test_logs_reconnect_after_the_device_comes_back(tmp_path, monkeypatch):
+    from lazyios.backend import NoDeviceError
+    from lazyios.tabs import logs as logs_module
+
+    monkeypatch.setattr(logs_module, "RETRY", (0.05,))
+    app, backend = make(tmp_path, problem=NoDeviceError("no device connected"))
+    reported: list[Exception] = []
+    app.report = reported.append  # type: ignore[method-assign]
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.press("2")
+        tab = app.query_one(LogsTab)
+        notice = tab.query_one(".notice", Static)
+        await until(pilot, lambda: "retrying" in str(notice.content))
+        await pilot.pause(0.3)  # several failed retries
+        assert len(reported) == 1  # one notification, not one per retry
+        backend.problem = None
+        await until(pilot, lambda: len(tab.buffer) > 5)
+        await until(pilot, lambda: not notice.display)
+
+
+async def test_logs_r_reconnects_now(tmp_path, monkeypatch):
+    from lazyios.backend import NoDeviceError
+    from lazyios.tabs import logs as logs_module
+
+    monkeypatch.setattr(logs_module, "RETRY", (3600.0,))
+    app, backend = make(tmp_path, problem=NoDeviceError("no device connected"))
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.press("2")
+        tab = app.query_one(LogsTab)
+        await until(pilot, lambda: "retrying" in str(tab.query_one(".notice", Static).content))
+        backend.problem = None
+        await pilot.press("r")
+        await until(pilot, lambda: len(tab.buffer) > 5)
+
+
+async def test_capture_stops_at_the_size_limit(tmp_path):
+    backend = FakeBackend(interval=0.001)
+    app = LazyiosApp(backend, tmp_path, max_capture=4000)
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.press("5")
+        await pilot.press("space")
+        await until(pilot, lambda: app.last_capture is not None and not app.capturing)
+        assert 0 < app.last_capture.stat().st_size <= 4000
+
+
+def test_max_capture_flag():
+    from lazyios.__main__ import parse_args
+
+    assert parse_args(["--max-capture-mb", "5"]).max_capture_mb == 5
+    assert parse_args([]).max_capture_mb == 1024
+    for bad in ("0", "-1", "1.5", "²"):
+        with pytest.raises(SystemExit):
+            parse_args(["--max-capture-mb", bad])
+
+
+async def test_screenshots_in_the_same_second_do_not_collide(tmp_path):
+    app, _ = make(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.press("6")
+        await pilot.pause()
+        await pilot.press("s")
+        await until(pilot, lambda: len(list((tmp_path / "screenshots").glob("*.png"))) == 1)
+        await pilot.press("s")
+        await until(pilot, lambda: len(list((tmp_path / "screenshots").glob("*.png"))) == 2)

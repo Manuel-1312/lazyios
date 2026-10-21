@@ -48,6 +48,7 @@ from .backend import (
     UsbmuxdError,
     undo_all,
 )
+from .files import create_private
 from .parsing import link_offset, parse_ip_packet
 
 LAUNCH_TIMEOUT = 15
@@ -107,6 +108,7 @@ class DeviceBackend:
         self._cond_dirty = self._loc_dirty = False
         self._cond_gen = self._loc_gen = 0
         self._active: Condition | None = None
+        self._seen_udid: str | None = None
 
     @property
     def tunnel_open(self) -> bool:
@@ -133,6 +135,18 @@ class DeviceBackend:
                 await ld.close()
 
     async def device_info(self) -> DeviceInfo:
+        try:
+            info = await self._device_info_usbmuxd()
+        except NoDeviceError:
+            if self._dvt is not None:  # unplugged: its DVT session is dead, do not reuse it
+                await self._reset_tunnel()
+            raise
+        if self._seen_udid not in (None, info.udid) and self._dvt is not None:
+            await self._reset_tunnel()  # another device took its place
+        self._seen_udid = info.udid
+        return info
+
+    async def _device_info_usbmuxd(self) -> DeviceInfo:
         try:
             return await self._device_info()
         except UsbmuxdError:
@@ -308,8 +322,7 @@ class DeviceBackend:
                         yield p
 
                 try:
-                    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-                    with path.open("wb") as out:
+                    with create_private(path) as out:
                         writer = asyncio.create_task(service.write_to_pcap(out, tee()))
                         writer.add_done_callback(lambda _: queue.put_nowait(None))
                         try:

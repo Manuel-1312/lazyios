@@ -37,6 +37,11 @@ TABS: list[tuple[str, type[TabBody]]] = [
 ]
 BATTERY_REFRESH = 30
 SHUTDOWN_TIMEOUT = 15
+MB = 1024 * 1024
+MAX_CAPTURE_MB = 1024
+# upper bounds for the file and per-packet overhead: the device path writes pcapng (block
+# headers, padding, sometimes a synthetic link header), the demo writes classic pcap
+PCAP_HEADER, PCAP_RECORD = 256, 48
 DEV_OFF = "developer mode is off: enable it in settings > privacy & security"
 
 
@@ -51,10 +56,13 @@ class LazyiosApp(App[None]):
         *(Binding(str(n), f"tab({n})", name, show=False) for n, (name, _) in enumerate(TABS, 1)),
     ]
 
-    def __init__(self, backend: Backend, out_dir: Path) -> None:
+    def __init__(
+        self, backend: Backend, out_dir: Path, max_capture: int = MAX_CAPTURE_MB * MB
+    ) -> None:
         super().__init__()
         self.backend = backend
         self.out_dir = out_dir
+        self.max_capture = max_capture  # bytes on disk, a capture stops past it
         self.info: DeviceInfo | None = None
         self.battery: Battery | None = None
         self.dev_mode: bool | None = None
@@ -155,11 +163,21 @@ class LazyiosApp(App[None]):
         self._capture_worker = self.run_task(self._capture(self.last_capture), group="capture")
 
     async def _capture(self, path: Path) -> None:
+        size = PCAP_HEADER
         try:
             async with aclosing(self.backend.capture(path)) as packets:
                 async for packet in packets:
                     self.pending.append(packet)
                     self.aggregator.feed(packet)
+                    size += PCAP_RECORD + packet.length
+                    if size > self.max_capture:
+                        self.notify(
+                            f"capture stopped: file reached the {self.max_capture // MB} MB limit"
+                            " (--max-capture-mb)",
+                            severity="warning",
+                            timeout=10,
+                        )
+                        break
         except BackendError as e:
             self.report(e)
         finally:

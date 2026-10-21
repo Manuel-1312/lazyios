@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import io
 import json
 from collections import OrderedDict
 from collections.abc import Iterable
@@ -13,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from .backend import Packet
+from .files import create_private, write_private
 from .parsing import clean_text, parse_dns_answers, parse_tls_sni, split_endpoint
 
 MAX_ROWS = 2000
@@ -230,19 +232,13 @@ def write_report(
 ) -> tuple[Path, Path]:
     """Write privacy-<stamp>.json and .csv into folder; returns (json path, csv path)."""
     now = now or datetime.now()
-    folder.mkdir(mode=0o700, parents=True, exist_ok=True)  # traffic metadata: owner only
     base = folder / f"privacy-{now.strftime('%Y%m%d-%H%M%S-%f')[:-3]}"
     data = report_rows(rows)
     summary = dict(zip(("apps", "domains", "trackers"), summarize(rows), strict=True))
     json_path, csv_path = base.with_suffix(".json"), base.with_suffix(".csv")
-    json_path.write_text(
-        json.dumps(
-            {"generated": _stamp(now.timestamp()), "summary": summary, "rows": data}, indent=2
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    with csv_path.open("w", newline="", encoding="utf-8") as out:
+    document = {"generated": _stamp(now.timestamp()), "summary": summary, "rows": data}
+    write_private(json_path, (json.dumps(document, indent=2) + "\n").encode())  # traffic metadata
+    with io.TextIOWrapper(create_private(csv_path), encoding="utf-8", newline="") as out:
         writer = csv.writer(out)
         writer.writerow(
             [

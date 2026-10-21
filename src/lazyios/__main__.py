@@ -9,10 +9,16 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from . import __version__
-from .app import LazyiosApp
+from .app import MAX_CAPTURE_MB, MB, LazyiosApp
 from .backend import Backend
 
 CLOSE_TIMEOUT = 5
+
+
+def _positive(value: str) -> int:
+    if not (value.isascii() and value.isdigit()) or int(value) < 1:
+        raise argparse.ArgumentTypeError("must be a whole number of 1 or more")
+    return int(value)
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -25,6 +31,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=Path,
         default=Path.home() / "lazyios",
         help="output directory for captures and screenshots (default: ~/lazyios)",
+    )
+    parser.add_argument(
+        "--max-capture-mb",
+        type=_positive,
+        default=MAX_CAPTURE_MB,
+        metavar="MB",
+        help=f"stop a capture when its pcap reaches this size (default: {MAX_CAPTURE_MB})",
     )
     parser.add_argument("--version", action="version", version=f"lazyios {__version__}")
     parser.add_argument("--selftest", action="store_true", help="boot the demo headless and exit")
@@ -76,7 +89,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     backend = make_backend(args)
     try:
         with contextlib.suppress(KeyboardInterrupt):
-            LazyiosApp(backend, args.out).run()
+            LazyiosApp(backend, args.out, args.max_capture_mb * MB).run()
     finally:
         if not backend.closed:  # the app's own shutdown did not run
             with contextlib.suppress(Exception):

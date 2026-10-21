@@ -16,13 +16,13 @@ HELP = """\
    q          quit (clears condition and location)
    ?          this help
    /          focus the filter, esc to leave it
-   r          refresh
+   r          refresh (logs: reconnect now)
 
- logs        p pause/resume   c clear
+ logs        p pause/resume   c clear   r reconnect
  processes   k kill   l launch by bundle id
  apps        enter launch
  network     space start/stop capture   o open capture
-             enter apply condition      x clear condition
+             enter apply condition      x clear condition   r reload
  tools       s screenshot   o open it   l coordinates
              enter set location   x clear location   f fps
  privacy     space start/stop capture   s sort   t trackers only

@@ -78,13 +78,13 @@ Use Python 3.12: on newer versions a few pymobiledevice3 dependencies have no pr
 ## Usage
 
 ```
-lazyios [--udid UDID] [--out DIR] [--demo]
+lazyios [--udid UDID] [--out DIR] [--max-capture-mb MB] [--demo]
 lazyios --version
 lazyios --selftest
 python -m lazyios
 ```
 
-Captures, screenshots and privacy reports go to `~/lazyios/captures`, `~/lazyios/screenshots` and `~/lazyios/reports` unless `--out` says otherwise.
+Captures, screenshots and privacy reports go to `~/lazyios/captures`, `~/lazyios/screenshots` and `~/lazyios/reports` unless `--out` says otherwise. A capture stops by itself when its pcap reaches `--max-capture-mb` (1024 by default).
 
 | key | action |
 | --- | --- |
@@ -93,7 +93,7 @@ Captures, screenshots and privacy reports go to `~/lazyios/captures`, `~/lazyios
 | `?` | help |
 | `/` | focus filter (`esc` to leave) |
 | `r` | refresh |
-| `p` / `c` | logs: pause, clear |
+| `p` / `c` / `r` | logs: pause, clear, reconnect now (it also reconnects by itself) |
 | `k` / `l` | processes: kill, launch by bundle id |
 | `enter` | apps: launch; network: apply condition; tools: set location |
 | `space` / `o` | network: start/stop capture, open it |
@@ -126,7 +126,7 @@ libimobiledevice and `idevicesyslog` are single-purpose command line tools, and 
 
 ## Notes
 
-- Capture files and privacy reports contain your traffic metadata (domains, IPs). Treat them as sensitive.
+- Capture files and privacy reports contain your traffic metadata (domains, IPs). Treat them as sensitive. lazyios writes them owner-only (folders 0700, files 0600 on macOS and Linux) and never overwrites an existing file.
 - An active condition is shown in red in the status line. Conditions and simulated location are cleared when you quit.
 
 ## Credits

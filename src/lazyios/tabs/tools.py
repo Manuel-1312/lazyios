@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import time
 from collections import deque
 from contextlib import aclosing
+from datetime import datetime
 from pathlib import Path
 
 from textual.app import ComposeResult
@@ -14,6 +14,7 @@ from textual.worker import Worker
 from .. import opener
 from ..art import header
 from ..backend import BackendError
+from ..files import write_private
 from .base import TabBody
 
 SAMPLES = 60
@@ -87,11 +88,13 @@ class ToolsTab(TabBody):
         except BackendError as e:
             self.lazy.report(e)
             return
-        path = (
-            self.lazy.out_dir / "screenshots" / f"screenshot-{time.strftime('%Y%m%d-%H%M%S')}.png"
-        )
-        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        path.write_bytes(data)
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")[:-3]  # two shots in a second
+        path = self.lazy.out_dir / "screenshots" / f"screenshot-{stamp}.png"
+        try:
+            write_private(path, data)
+        except OSError as e:
+            self.app.notify(f"cannot save screenshot: {e}", severity="error", markup=False)
+            return
         self.last_shot = path
         self.query_one("#shot", Static).update(f"saved {path}   (o open)")
 

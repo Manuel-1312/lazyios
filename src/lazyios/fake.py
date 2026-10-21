@@ -24,6 +24,7 @@ from .backend import (
     Process,
     undo_all,
 )
+from .files import create_private
 
 # 1x1 PNG, enough for the tools tab to have something to save
 _PNG = base64.b64decode(
@@ -312,7 +313,6 @@ class FakeBackend:
     async def capture(self, path: Path) -> AsyncIterator[Packet]:
         self._need_device()
         self.captures += 1
-        path.parent.mkdir(parents=True, exist_ok=True)
         rng = random.Random(7)
         fresh = [(proc, pid, host, cname) for proc, pid, hosts in _TRAFFIC for host, cname in hosts]
         rng.shuffle(fresh)
@@ -320,7 +320,7 @@ class FakeBackend:
         flows: list[tuple[str, int, str | None]] = []
         resolved: set[str] = set()
         queue: deque[Frame] = deque()
-        with path.open("wb") as out:
+        with create_private(path) as out:
             out.write(_pcap_header())
             while True:
                 await asyncio.sleep(self.interval)
