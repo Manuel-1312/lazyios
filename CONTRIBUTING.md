@@ -15,7 +15,7 @@ say which build worked and which one does not.
 
 ## Development setup
 
-Python 3.10 or newer (3.12 recommended):
+Python 3.11 or newer (3.12 recommended):
 
     git clone https://github.com/Manuel-1312/lazyios
     cd lazyios
@@ -32,7 +32,7 @@ Run it without a phone:
     ruff format --check
     pytest
 
-CI runs the same on Linux, macOS and Windows with Python 3.10, 3.12 and 3.13. Tests use the
+CI runs the same on Linux, macOS and Windows with Python 3.11, 3.12 and 3.13. Tests use the
 fake backend in `src/lazyios/fake.py` and never need a device. If a change depends on what a
 real iPhone returns, say which device and iOS build you tested it on, and update the
 capability table in `docs/ARCHITECTURE.md` when you verify something new.

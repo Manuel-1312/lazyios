@@ -78,7 +78,7 @@ Use Python 3.12: on newer versions a few pymobiledevice3 dependencies have no pr
 - Windows: the Apple Devices app (`winget install 9NP83LWLPZ9K -s msstore`) or iTunes, for usbmuxd. If Apple Devices is installed but not running, lazyios starts it for you.
 - macOS: nothing extra.
 - Linux: the `usbmuxd` package (`sudo apt install usbmuxd` or your distro's equivalent).
-- Python 3.10+ only for the pip/uv installs.
+- Python 3.11+ only for the pip/uv installs.
 
 ## Usage
 
