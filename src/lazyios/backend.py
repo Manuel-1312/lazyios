@@ -66,6 +66,8 @@ class ProcSample:
     name: str
     cpu: float | None  # percent of one core; None in the first sample
     memory: int | None  # physical footprint, bytes
+    rx: float | None = None  # bytes per second received; None: unknown or left out
+    tx: float | None = None  # bytes per second sent
 
 
 @dataclass(frozen=True)
@@ -75,6 +77,7 @@ class SysSample:
     cpu: float | None  # percent of all cores together, 0-100
     memory: float | None  # fraction of physical memory in use
     processes: tuple[ProcSample, ...] = ()
+    net: bool = True  # False: per-process network rates are off, rx and tx stay None
 
 
 @dataclass(frozen=True)

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -28,6 +30,7 @@ from pymobiledevice3.services.dvt.instruments.device_info import DeviceInfo as D
 from pymobiledevice3.services.dvt.instruments.dvt_provider import DvtProvider
 from pymobiledevice3.services.dvt.instruments.graphics import Graphics
 from pymobiledevice3.services.dvt.instruments.location_simulation import LocationSimulation
+from pymobiledevice3.services.dvt.instruments.network_statistics import NetworkStatistics
 from pymobiledevice3.services.dvt.instruments.process_control import ProcessControl
 from pymobiledevice3.services.dvt.instruments.screenshot import Screenshot
 from pymobiledevice3.services.dvt.instruments.sysmontap import Sysmontap
@@ -61,6 +64,12 @@ from .parsing import clean_text, link_offset, parse_ip_packet
 LAUNCH_TIMEOUT = 15
 PAYLOAD_MAX = 2048  # enough for a DNS answer or the start of a TLS ClientHello
 SYSMON_MS = 1000
+NET_TIMEOUT = 2.0  # one NetworkStatistics call; about 80 ms for 450 processes
+NET_FAILS = 3  # consecutive failed ticks before network stats are given up
+NET_MAX_GAP = 10.0  # seconds between two records of a pid that still give a rate
+NET_TUNNEL = frozenset({"remotepairingdeviced", "lockdownd", "DTServiceHub"})  # our own link
+
+log = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -462,7 +471,7 @@ class DeviceBackend:
             system_fields = list(tap.system_attributes_cls.__dataclass_fields__)
             at = [fields.index(f) for f in ("pid", "name", "cpuUsage", "physFootprint")]
             cores, cpu, memory = 0, None, None
-            async with tap:
+            async with tap, _NetSampler(await self._provider()) as net:
                 async for row in tap:
                     if not isinstance(row, dict):
                         continue
@@ -479,9 +488,15 @@ class DeviceBackend:
                         )
                         memory = used / size if used is not None and size else None
                     if isinstance(processes := row.get("Processes"), dict):
-                        samples = (_proc_sample(info, at) for info in processes.values())
-                        yield SysSample(time.time(), cores, cpu, memory,
-                                        tuple(s for s in samples if s is not None))  # fmt: skip
+                        samples = [_proc_sample(info, at) for info in processes.values()]
+                        samples = [s for s in samples if s is not None]
+                        rates = await net.sample({s.pid: s.name for s in samples})
+                        yield SysSample(
+                            time.time(), cores, cpu, memory,
+                            tuple(replace(s, rx=r[0], tx=r[1]) if (r := rates.get(s.pid)) else s
+                                  for s in samples),
+                            net.on,
+                        )  # fmt: skip
 
     async def device_ids(self) -> list[str]:
         async with _guard("device list"):
@@ -582,6 +597,93 @@ def _proc_sample(info: Any, at: list[int]) -> ProcSample | None:
         return None
     cpu, memory = _number(cpu), _number(memory)
     return ProcSample(pid, clean_text(str(name or "")), cpu, int(memory) if memory else None)
+
+
+def _net_counted(pid: int, name: str) -> bool:
+    """The kernel and the daemons on our own link show lazyios's USB traffic: no rate for them."""
+    return pid != 0 and name not in NET_TUNNEL
+
+
+class _NetRates:
+    """Bytes per second per pid from NetworkStatistics records, from the second one of a pid."""
+
+    def __init__(self) -> None:
+        self._seen: dict[int, float] = {}  # pid -> time of its previous record
+
+    def update(self, records: Any, now: float) -> dict[int, tuple[float, float]]:
+        seen, self._seen, rates = self._seen, {}, {}  # a pid that went away starts over
+        for pid, record in records.items() if isinstance(records, dict) else ():
+            if not isinstance(record, dict):
+                continue
+            stamp = getattr(record.get("time"), "utc", None)  # NSDate -> datetime
+            stamp = stamp.timestamp() if isinstance(stamp, datetime) else now
+            self._seen[pid] = stamp
+            rx = _number(record.get("net.rx.bytes.delta"))
+            tx = _number(record.get("net.tx.bytes.delta"))
+            dt = stamp - seen.get(pid, stamp)  # 0 for a pid not seen before: its first record
+            if 0 < dt <= NET_MAX_GAP and rx is not None and tx is not None:
+                rates[pid] = (max(rx, 0) / dt, max(tx, 0) / dt)
+        return rates
+
+
+class _NetSampler:
+    """Per-process network rates next to Sysmontap. A failed tick (timeout or bad reply) is
+    skipped; NET_FAILS in a row turn it off for the rest of the session. A lost connection is
+    not handled here. CPU and memory keep flowing either way."""
+
+    def __init__(self, dvt: DvtProvider) -> None:
+        self.on = True
+        self._fails = 0
+        self._dvt = dvt
+        self._service: Any = None
+        self._started: set[int] = set()
+        self._rates = _NetRates()
+
+    async def __aenter__(self) -> _NetSampler:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        if self._service is not None and self._started:
+            with suppress(Exception):
+                await asyncio.wait_for(
+                    self._service.stop_sampling_for_pids_(sorted(self._started)), NET_TIMEOUT
+                )
+
+    async def sample(self, names: dict[int, str]) -> dict[int, tuple[float, float]]:
+        """Rates for the pids in {pid: name}; empty while off, or until a second record per pid."""
+        if not self.on:
+            return {}
+        pids = sorted(p for p, n in names.items() if _net_counted(p, n))
+        try:
+            if self._service is None:
+                stats = NetworkStatistics(self._dvt, [])
+                await stats.connect()
+                self._service = stats.service
+            if not self._started.issuperset(pids):
+                # Whether a second start adds to the set or replaces it cannot be told on iOS
+                # 27.2 (see docs/ARCHITECTURE.md); starting the whole set is right for the
+                # sampled set either way. If a future iOS resets counters on start, one tick of
+                # a known pid could be off. Marked first, so a cancel mid-start still stops them.
+                self._started.update(pids)
+                await asyncio.wait_for(self._service.start_sampling_for_pids_(pids), NET_TIMEOUT)
+            records = await asyncio.wait_for(
+                self._service.sample_attributes_for_pids_({}, pids), NET_TIMEOUT
+            )
+        except (asyncio.TimeoutError, TimeoutError) as e:  # transient; before OSError (3.11+)
+            return self._failed(e)
+        except (ConnectionTerminatedError, OSError, EOFError):
+            raise  # the link is gone: the monitor ends through _dvt_guard
+        except Exception as e:  # the library raises many kinds on a bad reply
+            return self._failed(e)
+        self._fails = 0
+        return self._rates.update(records, time.monotonic())
+
+    def _failed(self, error: BaseException) -> dict[int, tuple[float, float]]:
+        self._fails += 1
+        if self._fails >= NET_FAILS:
+            log.warning("network stats off: %s", error or type(error).__name__)
+            self.on = False
+        return {}
 
 
 async def _domain(ld: LockdownClient, domain: str) -> dict[str, Any]:

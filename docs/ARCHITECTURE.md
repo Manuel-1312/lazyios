@@ -71,9 +71,10 @@ not in this table is not promised.
 | data | source | needs Developer Mode | verified |
 | --- | --- | --- | --- |
 | packets with pid + process name | `PcapdService` (lockdown) | no | yes |
-| connections, rx/tx bytes, RTT | DVT `NetworkMonitor` | yes | yes, but **pid is -2 for every connection**, bytes are per-second deltas: no app attribution, so the inspector uses pcapd |
+| connections, rx/tx bytes, RTT | DVT `NetworkMonitor` | yes | yes, but **pid is -2 for every connection**, bytes are per-second deltas: no app attribution, so the inspector uses pcapd (upstream confirms it: https://github.com/doronz88/pymobiledevice3/issues/2092) |
 | per-process CPU, memory (physFootprint, resident) | DVT `Sysmontap` | yes | yes (571-671 processes); per-process `cpuUsage` is % of one core, `None` in the first sample |
 | system CPU and memory | DVT `Sysmontap` | yes | yes: `CPU_TotalLoad` sums all cores (divide by `CPUCount`); memory as `vmUsedCount` / `physMemSize` pages |
+| per-process network bytes in and out | DVT `NetworkStatistics` (`sampleAttributes:forPIDs:`, one call per tick) | yes | yes (457 pids in ~80 ms). A record per requested pid, even with no traffic: `net.rx.bytes`, `net.tx.bytes` (and `.packets`), each with `.delta`, plus `pid` and `time`. The first reply is left over from before the window, so a pid's first record is dropped; the next one can still span many seconds, so a gap over 10 s gives no rate. It counts our own USB tunnel: pid 0, `remotepairingdeviced`, `lockdownd` and `DTServiceHub` show hundreds of KB/s that are lazyios, so they get no rate. Ranking matches pcapd per app, absolute values are about 0.7x pcapd's: a gauge, not a measurement. `startSamplingForPIDs:` / `stopSamplingForPIDs:` changed nothing here: records and moving counters came back for pids never started, and after a stop. So on iOS 27.2 whether a second start adds to the set or replaces it cannot be told apart; lazyios starts the whole set whenever a new pid shows up, right either way |
 | FPS | DVT `Graphics` | yes | yes (existing tools tab) |
 | battery level, cycles, charger | `DiagnosticsService.get_battery` | no | yes |
 | battery health, voltage, current | `get_battery` `BatteryData.DesignCapacity` / `FullChargeCapacity`, `Voltage`, `InstantAmperage` | no | yes |

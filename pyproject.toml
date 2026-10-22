@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "lazyios"
-version = "0.3.0"
+version = "0.4.0"
 description = "Terminal UI to control your iPhone from Windows, macOS and Linux: see which apps talk to which servers and trackers, syslog, processes, packet capture, network conditions. No jailbreak, no Xcode."
 readme = "README.md"
 requires-python = ">=3.10"

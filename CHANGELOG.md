@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0
+
+- processes: `m` also shows how many bytes per second each process receives and sends
+  (`up/s`, `down/s`) and the total in the status line, from the device's own counters, no
+  capture needed; an approximate gauge, and lazyios's own USB traffic is left out
+
 ## 0.3.0
 
 New tabs and tools

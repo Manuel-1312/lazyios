@@ -115,7 +115,7 @@ RichLog {
 }
 
 #perf {
-    height: 1;
+    height: auto;
     padding: 0 1;
 }
 

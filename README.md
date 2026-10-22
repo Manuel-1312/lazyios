@@ -31,7 +31,7 @@ Tracker data: AdGuard companiesdb, [CC BY-SA 4.0](https://creativecommons.org/li
 
 - overview: device info, battery (level, cycles, health against design capacity, voltage, current, charger), developer mode state, `a` security audit
 - logs: live syslog with level colors, filter, pause, bounded buffer
-- processes: list, filter, kill (with confirmation), launch by bundle id, `m` live CPU and memory per process with a CPU history sparkline
+- processes: list, filter, kill (with confirmation), launch by bundle id, `m` live CPU, memory and network (bytes in and out per second) per process with a CPU history sparkline
 - apps: installed user apps, launch with enter
 - network: packet capture to a real `.pcap` with a live table, open in Wireshark; network, thermal and GPU conditions
 - privacy: which app talks to which domain, known trackers flagged, how each name was learned (TLS SNI, DNS or none), filter, sort, JSON and CSV export
@@ -102,7 +102,7 @@ Each device gets its own folder, named after its UDID: captures, screenshots, re
 | `/` | focus filter (`esc` to leave) |
 | `r` | refresh |
 | `a` | overview: security audit (`e` exports it) |
-| `m` | processes: live CPU and memory |
+| `m` | processes: live CPU, memory and network |
 | `p` / `c` / `r` | logs: pause, clear, reconnect now (it also reconnects by itself) |
 | `v` | logs: lowest level shown (all, notice, warning, error) |
 | `[` / `]` | network: smaller / bigger conditions pane |
@@ -176,9 +176,11 @@ background is not judged: none of the interfaces lazyios uses tells which app is
 `m` in the processes tab samples CPU and memory once a second through Instruments (Developer
 Mode). CPU is the share of all cores; per process it is the share of one core, so a busy process
 can show more than 100 / cores. Memory in use is what iOS counts as used pages: it keeps memory
-nearly full on purpose, so the per-process footprint says more. Battery temperature and other
-thermal readings are not reported over these interfaces, so lazyios shows them as n/a rather
-than guessing.
+nearly full on purpose, so the per-process footprint says more. `up/s` and `down/s` are bytes per
+second from the device's own per-process network counters (no capture needed): an approximate
+gauge, about 0.7 of what a capture counts, and the USB link lazyios itself uses is left out.
+Battery temperature and other thermal readings are not reported over these interfaces, so
+lazyios shows them as n/a rather than guessing.
 
 `a` in the overview runs a security audit from values the phone reports to a trusted computer:
 passcode set, Developer Mode, debugging and sync over Wi-Fi, encryption of computer backups,

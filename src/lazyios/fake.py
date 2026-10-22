@@ -101,6 +101,14 @@ _PROCS = [
     ("sharingd", 140, False),
 ]
 
+_BUSY = {"Safari": 400_000, "Maps": 60_000, "apsd": 3_000}  # bytes per second, on average
+
+
+def _fake_rates(rng: random.Random, name: str) -> tuple[float, float]:
+    busy = _BUSY.get(name, 0)
+    return round(busy * rng.random() * 2), round(busy * rng.random() / 4)
+
+
 _APPS = [
     App("FitTrack", "com.example.fittrack", "4.2", "FitTrack"),
     App("Maps", "com.example.maps", "3.2.1", "Maps"),
@@ -458,7 +466,8 @@ class FakeBackend:
             await asyncio.sleep(self.interval)
             procs = tuple(
                 ProcSample(pid, name, None if first else round(rng.random() * 30, 1),
-                           rng.randint(2, 300) * 1024 * 1024)
+                           rng.randint(2, 300) * 1024 * 1024,
+                           *(None, None) if first else _fake_rates(rng, name))
                 for name, pid, _ in _PROCS
             )  # fmt: skip
             cpu = None if first else round(rng.random() * 40, 1)
