@@ -8,7 +8,13 @@ from textual.widgets import DataTable, RichLog, Static, TabbedContent
 
 from lazyios import usbmuxd
 from lazyios.app import LazyiosApp
-from lazyios.backend import BackendError, NotTrustedError, UsbmuxdError
+from lazyios.backend import (
+    BackendError,
+    NotTrustedError,
+    ProcSample,
+    SysSample,
+    UsbmuxdError,
+)
 from lazyios.fake import FakeBackend
 from lazyios.tabs.logs import LogsTab
 from lazyios.tabs.network import NetworkTab
@@ -928,6 +934,45 @@ async def test_process_monitor_shows_cpu_and_memory(tmp_path):
         await pilot.press("m")
         await until(pilot, lambda: not tab.monitoring)
         assert not tab.query_one("#cpu-spark").display and tab.max_shown is None
+
+
+async def test_process_monitor_shows_network_rates(tmp_path):
+    app, _ = make(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        await until(pilot, lambda: app.info is not None)
+        await pilot.press("3")
+        tab = app.query_one(ProcessesTab)
+        await until(pilot, lambda: tab.items)
+        await pilot.press("m")
+        await until(pilot, lambda: any(s.rx for s in tab.usage.values()))
+        table = tab.query_one(DataTable)
+        rows = {int(k.value): [str(c) for c in table.get_row(k)] for k in table.rows}
+        safari = next(p.pid for p in tab.usage.values() if p.name == "Safari")
+        assert rows[safari][-2].endswith("/s") and rows[safari][-1].endswith("/s")
+        assert "usb tunnel not counted" in text_of(app, "#perf")
+        await pilot.press("m")
+        await until(pilot, lambda: not tab.monitoring)
+
+
+async def test_processes_tab_shows_dashes_for_unknown_rates_and_says_when_net_is_off(tmp_path):
+    app, _ = make(tmp_path)
+    async with app.run_test(size=SIZE) as pilot:
+        await until(pilot, lambda: app.info is not None)
+        await pilot.press("3")
+        tab = app.query_one(ProcessesTab)
+        await until(pilot, lambda: tab.items)
+        procs = (
+            ProcSample(1, "launchd", 1.0, 1024),
+            ProcSample(5, "Safari", 2.0, 2048, 150_000, 2_048),
+        )
+        tab.show_sample(SysSample(0.0, 6, 5.0, 0.7, procs))
+        table = tab.query_one(DataTable)
+        assert [str(c) for c in table.get_row("1")][-2:] == ["-", "-"]
+        assert [str(c) for c in table.get_row("5")][-2:] == ["146K/s", "2.0K/s"]
+        perf = text_of(app, "#perf")
+        assert "in 146K/s" in perf and "out 2.0K/s" in perf
+        tab.show_sample(SysSample(0.0, 6, 5.0, 0.7, procs, net=False))
+        assert "net n/a" in text_of(app, "#perf") and "in 146K/s" not in text_of(app, "#perf")
 
 
 async def test_switching_devices_starts_a_clean_session(tmp_path):

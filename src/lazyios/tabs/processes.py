@@ -21,6 +21,14 @@ HISTORY = 120  # samples of total CPU kept for the sparkline, about two minutes
 MONITOR_ROWS = 300  # busiest processes shown while the monitor runs
 
 
+def _rate(value: float | None) -> Text:
+    """Bytes per second; ACID from 100 KB/s up."""
+    if value is None:
+        return Text("-", style=GRAY, justify="right")
+    return Text(f"{human_bytes(value)}/s", style=ACID if value >= 100 * 1024 else GRAY,
+                justify="right")  # fmt: skip
+
+
 class ProcessesTab(TableTab[Process]):
     title = "processes"
     columns = (
@@ -30,12 +38,14 @@ class ProcessesTab(TableTab[Process]):
         ("started", False),
         ("cpu %", True),
         ("memory", True),
+        ("in/s", True),
+        ("out/s", True),
     )
     BINDINGS = [
         *TableTab.BINDINGS,
         Binding("k", "kill", "kill", id="kill"),
         Binding("l", "launch", "launch", id="launch"),
-        Binding("m", "toggle_monitor", "cpu/mem", id="monitor"),
+        Binding("m", "toggle_monitor", "cpu/mem/net", id="monitor"),
     ]
 
     def __init__(self, **kwargs: Any) -> None:
@@ -55,7 +65,7 @@ class ProcessesTab(TableTab[Process]):
 
     def on_mount(self) -> None:  # Textual also runs TableTab.on_mount (columns) on its own
         self.query_one("#cpu-spark").display = False
-        self.query_one("#perf", Static).update(Text("m live cpu and memory", style=DIM))
+        self.query_one("#perf", Static).update(Text("m live cpu, memory and network", style=DIM))
 
     def key(self, item: Process) -> str:
         return str(item.pid)
@@ -64,6 +74,7 @@ class ProcessesTab(TableTab[Process]):
         sample = self.usage.get(item.pid)
         cpu = sample.cpu if sample else None
         memory = sample.memory if sample else None
+        rx, tx = (sample.rx, sample.tx) if sample else (None, None)
         return (
             Text(str(item.pid), justify="right"),
             Text(item.name, style=BONE if item.is_app else GRAY),
@@ -72,6 +83,8 @@ class ProcessesTab(TableTab[Process]):
             Text("-" if cpu is None else f"{cpu:.1f}", style=ACID if cpu and cpu >= 10 else GRAY,
                  justify="right"),
             Text("-" if memory is None else human_bytes(memory), style=GRAY, justify="right"),
+            _rate(rx),
+            _rate(tx),
         )  # fmt: skip
 
     def haystack(self, item: Process) -> tuple[str, ...]:
@@ -134,11 +147,21 @@ class ProcessesTab(TableTab[Process]):
             self.query_one("#cpu-spark", Sparkline).data = list(self.cpu_history)
         cpu = "-" if sample.cpu is None else f"{sample.cpu:.0f}%"
         memory = "-" if sample.memory is None else f"{sample.memory:.0%}"
+        rx = sum(p.rx or 0 for p in sample.processes)
+        tx = sum(p.tx or 0 for p in sample.processes)
+        net = (
+            Text.assemble(
+                ("  in ", GRAY), (f"{human_bytes(rx)}/s", BONE),
+                ("  out ", GRAY), (f"{human_bytes(tx)}/s", BONE), ("  usb tunnel not counted", DIM),
+            )
+            if sample.net
+            else Text("  net n/a", style=DIM)
+        )  # fmt: skip
         self.query_one("#perf", Static).update(
             Text.assemble(
                 ("cpu ", GRAY), (cpu, ACID), (f" of {sample.cores} cores", GRAY),
                 ("  memory ", GRAY), (memory, BONE), (" in use, iOS keeps it full", DIM),
-                (f"  {len(sample.processes)} processes", GRAY), ("  m stop", DIM),
+                net, (f"  {len(sample.processes)} processes", GRAY), ("  m stop", DIM),
             )
         )  # fmt: skip
 

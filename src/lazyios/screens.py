@@ -37,7 +37,7 @@ TAB_HELP = {
              v lowest level shown: all, notice, warning, error
 """,
     "processes": """\
- processes   k kill   l launch by bundle id   m live cpu and memory
+ processes   k kill   l launch by bundle id   m live cpu, memory and network
 """,
     "apps": """\
  apps        enter launch

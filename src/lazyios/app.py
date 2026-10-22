@@ -548,7 +548,7 @@ class LazyiosApp(App[None]):
             ("export the privacy scores", "score", "export"),
             ("export the timeline", "timeline", "export"),
             ("watch process starts and exits", "timeline", "toggle_processes"),
-            ("live cpu and memory", "processes", "toggle_monitor"),
+            ("live cpu, memory and network", "processes", "toggle_monitor"),
             ("security audit", "overview", "audit"),
             ("take a screenshot", "tools", "screenshot"),
             ("clear the network condition", "network", "clear_condition"),
