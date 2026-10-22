@@ -949,7 +949,7 @@ async def test_process_monitor_shows_network_rates(tmp_path):
         rows = {int(k.value): [str(c) for c in table.get_row(k)] for k in table.rows}
         safari = next(p.pid for p in tab.usage.values() if p.name == "Safari")
         assert rows[safari][-2].endswith("/s") and rows[safari][-1].endswith("/s")
-        assert "usb tunnel not counted" in text_of(app, "#perf")
+        assert "excl. usb" in text_of(app, "#perf")
         await pilot.press("m")
         await until(pilot, lambda: not tab.monitoring)
 
@@ -968,11 +968,11 @@ async def test_processes_tab_shows_dashes_for_unknown_rates_and_says_when_net_is
         tab.show_sample(SysSample(0.0, 6, 5.0, 0.7, procs))
         table = tab.query_one(DataTable)
         assert [str(c) for c in table.get_row("1")][-2:] == ["-", "-"]
-        assert [str(c) for c in table.get_row("5")][-2:] == ["146K/s", "2.0K/s"]
+        assert [str(c) for c in table.get_row("5")][-2:] == ["2.0K/s", "146K/s"]  # up, then down
         perf = text_of(app, "#perf")
-        assert "in 146K/s" in perf and "out 2.0K/s" in perf
+        assert "up 2.0K/s" in perf and "down 146K/s" in perf
         tab.show_sample(SysSample(0.0, 6, 5.0, 0.7, procs, net=False))
-        assert "net n/a" in text_of(app, "#perf") and "in 146K/s" not in text_of(app, "#perf")
+        assert "net n/a" in text_of(app, "#perf") and "down 146K/s" not in text_of(app, "#perf")
 
 
 async def test_switching_devices_starts_a_clean_session(tmp_path):

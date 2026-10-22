@@ -176,7 +176,7 @@ background is not judged: none of the interfaces lazyios uses tells which app is
 `m` in the processes tab samples CPU and memory once a second through Instruments (Developer
 Mode). CPU is the share of all cores; per process it is the share of one core, so a busy process
 can show more than 100 / cores. Memory in use is what iOS counts as used pages: it keeps memory
-nearly full on purpose, so the per-process footprint says more. `in/s` and `out/s` are bytes per
+nearly full on purpose, so the per-process footprint says more. `up/s` and `down/s` are bytes per
 second from the device's own per-process network counters (no capture needed): an approximate
 gauge, about 0.7 of what a capture counts, and the USB link lazyios itself uses is left out.
 Battery temperature and other thermal readings are not reported over these interfaces, so

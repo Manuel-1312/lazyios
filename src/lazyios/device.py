@@ -65,6 +65,7 @@ LAUNCH_TIMEOUT = 15
 PAYLOAD_MAX = 2048  # enough for a DNS answer or the start of a TLS ClientHello
 SYSMON_MS = 1000
 NET_TIMEOUT = 2.0  # one NetworkStatistics call; about 80 ms for 450 processes
+NET_FAILS = 3  # consecutive failed ticks before network stats are given up
 NET_MAX_GAP = 10.0  # seconds between two records of a pid that still give a rate
 NET_TUNNEL = frozenset({"remotepairingdeviced", "lockdownd", "DTServiceHub"})  # our own link
 
@@ -626,11 +627,13 @@ class _NetRates:
 
 
 class _NetSampler:
-    """Per-process network rates next to Sysmontap. A failure that is not a lost connection
-    turns it off for the rest of the session; CPU and memory keep flowing."""
+    """Per-process network rates next to Sysmontap. A failed tick (timeout or bad reply) is
+    skipped; NET_FAILS in a row turn it off for the rest of the session. A lost connection is
+    not handled here. CPU and memory keep flowing either way."""
 
     def __init__(self, dvt: DvtProvider) -> None:
         self.on = True
+        self._fails = 0
         self._dvt = dvt
         self._service: Any = None
         self._started: set[int] = set()
@@ -657,24 +660,29 @@ class _NetSampler:
                 await stats.connect()
                 self._service = stats.service
             if not self._started.issuperset(pids):
-                # whether a second start adds to the set or replaces it is not documented:
-                # starting the whole set is right either way (see docs/ARCHITECTURE.md)
-                await asyncio.wait_for(self._service.start_sampling_for_pids_(pids), NET_TIMEOUT)
+                # Whether a second start adds to the set or replaces it cannot be told on iOS
+                # 27.2 (see docs/ARCHITECTURE.md); starting the whole set is right for the
+                # sampled set either way. If a future iOS resets counters on start, one tick of
+                # a known pid could be off. Marked first, so a cancel mid-start still stops them.
                 self._started.update(pids)
+                await asyncio.wait_for(self._service.start_sampling_for_pids_(pids), NET_TIMEOUT)
             records = await asyncio.wait_for(
                 self._service.sample_attributes_for_pids_({}, pids), NET_TIMEOUT
             )
-        except asyncio.TimeoutError as e:  # before OSError: it is a subclass of it on 3.11+
-            return self._off(e)
+        except (asyncio.TimeoutError, TimeoutError) as e:  # transient; before OSError (3.11+)
+            return self._failed(e)
         except (ConnectionTerminatedError, OSError, EOFError):
             raise  # the link is gone: the monitor ends through _dvt_guard
         except Exception as e:  # the library raises many kinds on a bad reply
-            return self._off(e)
+            return self._failed(e)
+        self._fails = 0
         return self._rates.update(records, time.monotonic())
 
-    def _off(self, error: BaseException) -> dict[int, tuple[float, float]]:
-        log.warning("network stats off: %s", error or type(error).__name__)
-        self.on = False
+    def _failed(self, error: BaseException) -> dict[int, tuple[float, float]]:
+        self._fails += 1
+        if self._fails >= NET_FAILS:
+            log.warning("network stats off: %s", error or type(error).__name__)
+            self.on = False
         return {}
 
 

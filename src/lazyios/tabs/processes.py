@@ -38,8 +38,8 @@ class ProcessesTab(TableTab[Process]):
         ("started", False),
         ("cpu %", True),
         ("memory", True),
-        ("in/s", True),
-        ("out/s", True),
+        ("up/s", True),
+        ("down/s", True),
     )
     BINDINGS = [
         *TableTab.BINDINGS,
@@ -83,8 +83,8 @@ class ProcessesTab(TableTab[Process]):
             Text("-" if cpu is None else f"{cpu:.1f}", style=ACID if cpu and cpu >= 10 else GRAY,
                  justify="right"),
             Text("-" if memory is None else human_bytes(memory), style=GRAY, justify="right"),
-            _rate(rx),
             _rate(tx),
+            _rate(rx),
         )  # fmt: skip
 
     def haystack(self, item: Process) -> tuple[str, ...]:
@@ -151,8 +151,8 @@ class ProcessesTab(TableTab[Process]):
         tx = sum(p.tx or 0 for p in sample.processes)
         net = (
             Text.assemble(
-                ("  in ", GRAY), (f"{human_bytes(rx)}/s", BONE),
-                ("  out ", GRAY), (f"{human_bytes(tx)}/s", BONE), ("  usb tunnel not counted", DIM),
+                ("  up ", GRAY), (f"{human_bytes(tx)}/s", BONE),
+                ("  down ", GRAY), (f"{human_bytes(rx)}/s", BONE), (" excl. usb", DIM),
             )
             if sample.net
             else Text("  net n/a", style=DIM)
@@ -160,7 +160,7 @@ class ProcessesTab(TableTab[Process]):
         self.query_one("#perf", Static).update(
             Text.assemble(
                 ("cpu ", GRAY), (cpu, ACID), (f" of {sample.cores} cores", GRAY),
-                ("  memory ", GRAY), (memory, BONE), (" in use, iOS keeps it full", DIM),
+                ("  memory ", GRAY), (memory, BONE), (" in use", DIM),
                 net, (f"  {len(sample.processes)} processes", GRAY), ("  m stop", DIM),
             )
         )  # fmt: skip

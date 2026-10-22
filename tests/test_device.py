@@ -84,12 +84,15 @@ def _record(rx: int, tx: int, at: datetime | None = None) -> dict:
 
 def test_net_rates_skip_the_first_record_of_a_pid():
     t0 = datetime(2026, 10, 22, 12, 0, tzinfo=timezone.utc)
+    at = lambda seconds: t0 + timedelta(seconds=seconds)  # noqa: E731
     rates = _NetRates()
-    assert rates.update({7: _record(5000, 900, t0)}, 0) == {}  # leftover from before the window
-    out = rates.update({7: _record(3000, 500, t0 + timedelta(seconds=2)), 8: _record(9, 9)}, 0)
+    assert rates.update({7: _record(5000, 900, at(0))}, 0) == {}  # leftover from before the window
+    out = rates.update({7: _record(3000, 500, at(2)), 8: _record(9, 9, at(2))}, 0)
     assert out == {7: (1500.0, 250.0)}  # delta over the seconds between the two records
-    assert rates.update({8: _record(40, 0), 7: _record(0, 0)}, 0) == {}  # 8 has no stamp but now
-    assert rates.update({7: _record(1, 1, t0 + timedelta(seconds=3))}, 0) == {}  # 7 started over
+    assert rates.update({8: _record(40, 0, at(3))}, 0) == {8: (40.0, 0.0)}  # 7 is not in this reply
+    out = rates.update({7: _record(100, 100, at(4)), 8: _record(10, 0, at(4))}, 0)
+    assert out == {8: (10.0, 0.0)}  # 7 is back: its first record again, no rate
+    assert rates.update({7: _record(100, 100, at(5))}, 0) == {7: (100.0, 100.0)}
 
 
 def test_net_rates_use_the_clock_without_a_record_time_and_reject_bad_gaps():
@@ -111,8 +114,8 @@ def test_the_kernel_and_our_own_link_get_no_rate():
 
 
 class FakeNetService:
-    def __init__(self, fail: Exception | None = None) -> None:
-        self.fail, self.calls, self.stopped = fail, [], []
+    def __init__(self, fail: Exception | None = None, hang: bool = False) -> None:
+        self.fail, self.hang, self.calls, self.stopped = fail, hang, [], []
         self.records: dict[int, dict] = {}
 
     async def start_sampling_for_pids_(self, pids: list[int]) -> None:
@@ -120,6 +123,8 @@ class FakeNetService:
 
     async def sample_attributes_for_pids_(self, attributes: dict, pids: list[int]) -> dict:
         self.calls.append(("sample", pids))
+        if self.hang:
+            await asyncio.sleep(10)
         if self.fail:
             raise self.fail
         seconds = sum(call == "sample" for call, _ in self.calls)  # one second per call
@@ -150,14 +155,42 @@ async def test_net_sampler_starts_new_pids_and_stops_on_exit():
     assert service.stopped == [[1, 5, 9]] and net.on
 
 
-@pytest.mark.parametrize("error", [ValueError("bad reply"), asyncio.TimeoutError()])
-async def test_net_sampler_turns_off_once_on_a_sample_failure(error, caplog):
+@pytest.mark.parametrize(
+    "error", [ValueError("bad reply"), asyncio.TimeoutError(), TimeoutError("timed out")]
+)
+async def test_net_sampler_turns_off_after_three_failed_ticks_in_a_row(error, caplog):
     async with _NetSampler(object()) as net:  # type: ignore[arg-type]
         net._service = FakeNetService(fail=error)
         with caplog.at_level("WARNING", logger="lazyios.device"):
+            for _ in range(2):  # a timeout, builtin or not, is transient: nothing is raised
+                assert await net.sample({1: "launchd"}) == {} and net.on
             assert await net.sample({1: "launchd"}) == {} and not net.on
             assert await net.sample({1: "launchd"}) == {}
     assert len([r for r in caplog.records if "network stats off" in r.message]) == 1
+
+
+async def test_net_sampler_survives_a_service_that_hangs_for_two_ticks(monkeypatch):
+    monkeypatch.setattr(device, "NET_TIMEOUT", 0.01)
+    async with _NetSampler(object()) as net:  # type: ignore[arg-type]
+        net._service = FakeNetService(hang=True)
+        assert await net.sample({1: "launchd"}) == {} and net.on
+        assert await net.sample({1: "launchd"}) == {} and net.on
+        assert await net.sample({1: "launchd"}) == {} and not net.on
+
+
+async def test_a_good_tick_resets_the_failure_count():
+    async with _NetSampler(object()) as net:  # type: ignore[arg-type]
+        service = net._service = FakeNetService(fail=ValueError("bad reply"))
+        await net.sample({1: "launchd"})
+        await net.sample({1: "launchd"})
+        service.fail = None
+        await net.sample({1: "launchd"})  # recovered
+        service.fail = ValueError("bad reply")
+        await net.sample({1: "launchd"})
+        await net.sample({1: "launchd"})
+        assert net.on  # two failures since the last good tick, not four
+        await net.sample({1: "launchd"})
+        assert not net.on
 
 
 async def test_net_sampler_lets_a_lost_connection_through():
@@ -209,7 +242,7 @@ async def test_sysmon_keeps_cpu_and_memory_when_network_sampling_cannot_start(mo
     monkeypatch.setattr(device, "Sysmontap", FakeTap)
     monkeypatch.setattr(device, "NetworkStatistics", Broken)
     samples = [s async for s in SysmonProbe().sysmon()]
-    assert len(samples) == 3 and not any(s.net for s in samples)
+    assert [s.net for s in samples] == [True, True, False]  # given up on the third failed tick
     assert [p.cpu for p in samples[-1].processes] == [3.0, 3.0]
     assert all(p.rx is None and p.tx is None for s in samples for p in s.processes)
 
