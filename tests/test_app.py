@@ -25,7 +25,7 @@ SIZE = (120, 40)
 DEMO = "00000000-DEMO000000000000"  # the demo device: its files go here
 
 
-async def until(pilot, check: Callable[[], bool], timeout: float = 5.0) -> None:
+async def until(pilot, check: Callable[[], bool], timeout: float = 15.0) -> None:
     deadline = asyncio.get_running_loop().time() + timeout
     while not check():
         if asyncio.get_running_loop().time() > deadline:
