@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- `lazyios report SESSION`: one saved session as text, `--json` or `--html FILE`, apps with the
+  most tracker domains first; same safety rules as `diff`; no device needed
+
 ## 0.5.0
 
 - `lazyios diff OLD NEW`: compare two saved session files offline (new and gone domains and

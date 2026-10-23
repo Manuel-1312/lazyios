@@ -132,6 +132,10 @@ def main(argv: Sequence[str] | None = None) -> None:
         from .diffcmd import run
 
         sys.exit(run(argv[1:]))
+    if argv[:1] == ["report"]:
+        from .reportcmd import run as run_report
+
+        sys.exit(run_report(argv[1:]))
     args = parse_args(argv)
     if args.selftest:
         sys.exit(selftest())
