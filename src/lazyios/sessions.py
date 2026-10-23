@@ -16,7 +16,7 @@ from typing import Any
 from .backend import App
 from .files import write_private
 from .parsing import clean_text, sanitize_host
-from .privacy import HostRow
+from .privacy import TRACKER_CATEGORIES, HostRow
 
 FORMAT = 1
 KEEP = 30  # sessions kept on disk; older ones are deleted
@@ -187,3 +187,28 @@ def compare(rows: Iterable[HostRow], earlier: list[Session]) -> dict[str, Change
             if r.tracker:
                 change.new_trackers.append(r.domain)
     return changes
+
+
+@dataclass
+class AppDiff:
+    added: list[str] = field(default_factory=list)  # named domains only in the newer session
+    removed: list[str] = field(default_factory=list)  # named domains only in the older one
+    new_trackers: list[str] = field(default_factory=list)  # added, with a tracker category
+    status: str = "changed"  # "new" or "gone" when the app is in only one session
+
+
+def diff(old: Session, new: Session) -> dict[str, AppDiff]:
+    """Per app, how the named domains differ between two sessions; unchanged apps are left out."""
+    out: dict[str, AppDiff] = {}
+    for name in sorted(old.apps.keys() | new.apps.keys()):
+        before, after = old.apps.get(name), new.apps.get(name)
+        was, now = before.domains if before else {}, after.domains if after else {}
+        d = AppDiff(
+            added=sorted(now.keys() - was.keys()),
+            removed=sorted(was.keys() - now.keys()),
+            status="new" if before is None else "gone" if after is None else "changed",
+        )
+        d.new_trackers = [h for h in d.added if now[h] in TRACKER_CATEGORIES]
+        if d.added or d.removed or d.status != "changed":
+            out[name] = d
+    return out
