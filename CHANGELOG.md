@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0
 
 - `lazyios diff OLD NEW`: compare two saved session files offline (new and gone domains and
   trackers per app), text, `--json` or `--html FILE`; `--fail-on-new-trackers` exits 1 for CI;
