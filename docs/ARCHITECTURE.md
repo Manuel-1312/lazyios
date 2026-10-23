@@ -12,6 +12,7 @@ privacy.py    HostAggregator: packets -> (app, domain) rows, tracker lookup, DNS
 flows.py      FlowTable: packets -> one row per connection, bytes each way, name confidence
 score.py      privacy score per app from the privacy rows, with the reason for every point
 sessions.py   local history of app -> domains per capture, compared with the next one
+diffcmd.py    `lazyios diff OLD NEW`: two session files compared offline (text, --json, --html)
 alerts.py     alert rules from <out>/alerts.json (validated, defaults on any error)
 timeline.py   bounded event list, syslog folding, process start/exit diff, time queries
 anomaly.py    spike, beacon, fanout and change rules with <out>/anomaly.json thresholds
