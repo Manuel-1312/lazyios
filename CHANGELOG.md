@@ -5,6 +5,9 @@
 - `lazyios diff OLD NEW`: compare two saved session files offline (new and gone domains and
   trackers per app), text, `--json` or `--html FILE`; `--fail-on-new-trackers` exits 1 for CI;
   no device needed
+- CI runs `lazyios --selftest` on every push; releases carry a build provenance attestation
+  (`gh attestation verify <binary> --repo Manuel-1312/lazyios`)
+- fixed a flaky UI test on slow Windows runners; new docs: audit, roadmap, testing, releasing
 
 ## 0.4.0
 
@@ -54,3 +57,22 @@ Under the hood
 
 Note: captures, screenshots and reports now go to `~/lazyios/<udid>/...`; files written by
 earlier versions stay in `~/lazyios/captures` and the like.
+
+## 0.2.1
+
+- Python 3.10: fixed `asyncio.TimeoutError` handling when launching apps
+- output folders are owner-only
+- dependency versions capped; tests run on Python 3.10 to 3.13
+
+## 0.2.0
+
+- privacy tab: which domains and trackers each app talks to
+- installable from PyPI
+
+## 0.1.1
+
+- installer uses Python 3.12
+
+## 0.1.0
+
+First release: terminal UI for an iPhone over USB.
