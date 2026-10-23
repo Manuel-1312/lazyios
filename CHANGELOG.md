@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- `lazyios diff OLD NEW`: compare two saved session files offline (new and gone domains and
+  trackers per app), text or `--json`; no device needed
+
 ## 0.4.0
 
 - processes: `m` also shows how many bytes per second each process receives and sends

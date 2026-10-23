@@ -127,6 +127,11 @@ def selftest() -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> None:
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["diff"]:
+        from .diffcmd import run
+
+        sys.exit(run(argv[1:]))
     args = parse_args(argv)
     if args.selftest:
         sys.exit(selftest())
