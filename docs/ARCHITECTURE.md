@@ -112,9 +112,11 @@ not in this table is not promised.
 - `format` must be exactly `1`. Any other value, or a missing key, a wrong type, a negative or
   boolean number, is rejected: `parse` returns `None`, the TUI skips the file, the commands
   exit 2. `FORMAT` changes only for incompatible changes.
-- `domains` maps a name to its tracker category (`ads`, `analytics`, `telemetry`, or `""` when
-  the name is not in the tracker data). Only names learned from TLS SNI or DNS are stored:
-  never IP addresses, never payloads.
-- Limits: 4 MB per file, 2000 apps, 2000 domains per app; 30 files kept per folder.
+- `domains` maps a name to its category in the tracker data (`ads`, `analytics`, `cdn`,
+  `social`, ... or `""` when the name is not listed); only `ads`, `analytics` and `telemetry`
+  count as trackers. Only names learned from TLS SNI or DNS are stored: never IP addresses,
+  never payloads.
+- Limits: 4 MB per file, 2000 apps, 2000 domains per app; the newest 30 files are kept per
+  folder by default (`--keep-sessions N` changes it).
   Names are cleaned (`clean_text`, `sanitize_host`) so a hostile file cannot inject control
   characters into the terminal or the HTML reports.
