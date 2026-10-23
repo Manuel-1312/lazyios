@@ -59,16 +59,21 @@ def render_html(old: Session, new: Session, changes: dict[str, AppDiff]) -> str:
         ] + [f"<li class='r'>- {esc(h)}</li>" for h in d.removed]
         tag = f" <i>{d.status} app</i>" if d.status != "changed" else ""
         body.append(f"<h2>{esc(name)}{tag}</h2><ul>{''.join(items)}</ul>")
+    return page("lazyios diff", f"{esc(old.started)} &rarr; {esc(new.started)}", "".join(body))
+
+
+def page(title: str, heading: str, body: str) -> str:
+    """The static page both commands write; callers escape every value they pass in."""
     return (
         "<!doctype html><meta charset='utf-8'>"
         "<meta http-equiv='Content-Security-Policy'"
         " content=\"default-src 'none'; style-src 'unsafe-inline'\">"
-        "<title>lazyios diff</title>"
+        f"<title>{title}</title>"
         "<style>body{font:14px system-ui;margin:2em;max-width:50em}ul{font-family:monospace}"
         ".t{color:#b00}.r{color:#666}</style>"
-        f"<h1>{esc(old.started)} &rarr; {esc(new.started)}</h1>"
-        "<p>Named domains only (TLS SNI or DNS). A new domain is a change, not a verdict.</p>"
-        + "".join(body)
+        f"<h1>{heading}</h1>"
+        "<p>Named domains only (TLS SNI or DNS). A domain is a fact about a connection, not a"
+        " verdict about the app.</p>" + body
     )
 
 
