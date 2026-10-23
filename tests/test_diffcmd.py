@@ -56,6 +56,20 @@ def test_cli_text_and_json(tmp_path, capsys):
     assert "+ c.com  (tracker)" in out and "- b.com" in out and "[new app]" in out
 
 
+def test_html_escapes_and_fail_on_new_trackers(tmp_path):
+    evil = session({"<script>x</script>": app(c_com="ads")}, started="2026-10-21T10:00:00")
+    a, b, out = tmp_path / "a.json", tmp_path / "b.json", tmp_path / "r.html"
+    a.write_text(session({})), b.write_text(evil)
+    with pytest.raises(SystemExit) as e:
+        main(["diff", str(a), str(b), "--html", str(out), "--fail-on-new-trackers"])
+    assert e.value.code == 1
+    page = out.read_text()
+    assert "<script>" not in page and "&lt;script&gt;" in page and "Content-Security-Policy" in page
+    with pytest.raises(SystemExit) as e:  # never overwrites an existing report
+        main(["diff", str(a), str(b), "--html", str(out)])
+    assert e.value.code == 2
+
+
 @pytest.mark.parametrize("content", ["not json", "{}", '{"format": 2}', "\xff"])
 def test_bad_files_exit_2_without_traceback(tmp_path, capsys, content):
     bad = tmp_path / "bad.json"
