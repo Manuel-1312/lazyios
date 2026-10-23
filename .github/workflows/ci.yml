@@ -27,3 +27,4 @@ jobs:
       - run: ruff check
       - run: ruff format --check
       - run: pytest
+      - run: lazyios --selftest
