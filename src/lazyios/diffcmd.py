@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import html
 import json
 from collections.abc import Sequence
 from pathlib import Path
 
+from .files import write_private
 from .sessions import MAX_FILE, AppDiff, Session, diff, parse
 
 
@@ -44,6 +46,32 @@ def render_json(old: Session, new: Session, changes: dict[str, AppDiff]) -> str:
     return json.dumps(doc, indent=2)
 
 
+def render_html(old: Session, new: Session, changes: dict[str, AppDiff]) -> str:
+    """One static page, no scripts or external loads; every value from the files is escaped."""
+    esc = html.escape
+    body = []
+    for name, d in changes.items():
+        items = [
+            f"<li class='{'t' if h in d.new_trackers else 'a'}'>+ {esc(h)}"
+            + (" <b>tracker</b>" if h in d.new_trackers else "")
+            + "</li>"
+            for h in d.added
+        ] + [f"<li class='r'>- {esc(h)}</li>" for h in d.removed]
+        tag = f" <i>{d.status} app</i>" if d.status != "changed" else ""
+        body.append(f"<h2>{esc(name)}{tag}</h2><ul>{''.join(items)}</ul>")
+    return (
+        "<!doctype html><meta charset='utf-8'>"
+        "<meta http-equiv='Content-Security-Policy'"
+        " content=\"default-src 'none'; style-src 'unsafe-inline'\">"
+        "<title>lazyios diff</title>"
+        "<style>body{font:14px system-ui;margin:2em;max-width:50em}ul{font-family:monospace}"
+        ".t{color:#b00}.r{color:#666}</style>"
+        f"<h1>{esc(old.started)} &rarr; {esc(new.started)}</h1>"
+        "<p>Named domains only (TLS SNI or DNS). A new domain is a change, not a verdict.</p>"
+        + "".join(body)
+    )
+
+
 def run(argv: Sequence[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="lazyios diff", description="Compare two session-*.json files from <out>/sessions."
@@ -51,12 +79,18 @@ def run(argv: Sequence[str]) -> int:
     parser.add_argument("old", type=Path)
     parser.add_argument("new", type=Path)
     parser.add_argument("--json", action="store_true", help="machine-readable output")
+    parser.add_argument("--html", type=Path, metavar="FILE", help="also write a static HTML page")
+    parser.add_argument(
+        "--fail-on-new-trackers", action="store_true", help="exit 1 when a tracker domain is new"
+    )
     args = parser.parse_args(argv)
     try:
         old, new = read_session(args.old), read_session(args.new)
-    except ValueError as e:
+        changes = diff(old, new)
+        if args.html:
+            write_private(args.html, render_html(old, new, changes).encode())
+    except (ValueError, OSError) as e:
         print(f"lazyios diff: {e}")
         return 2
-    changes = diff(old, new)
     print((render_json if args.json else render_text)(old, new, changes))
-    return 0
+    return 1 if args.fail_on_new_trackers and any(d.new_trackers for d in changes.values()) else 0

@@ -3,7 +3,8 @@
 ## Unreleased
 
 - `lazyios diff OLD NEW`: compare two saved session files offline (new and gone domains and
-  trackers per app), text or `--json`; no device needed
+  trackers per app), text, `--json` or `--html FILE`; `--fail-on-new-trackers` exits 1 for CI;
+  no device needed
 
 ## 0.4.0
 
