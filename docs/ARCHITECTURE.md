@@ -91,3 +91,30 @@ not in this table is not promised.
 | backup encryption | lockdown domain `com.apple.mobile.backup` `WillEncrypt` | no | yes |
 | configuration profiles, supervision | `MobileConfigService` `GetProfileList`, `GetCloudConfiguration` (read requests only) | no | yes |
 | connected devices | `usbmux.list_devices`, lockdown with `autopair=False` | no | yes; never triggers a Trust prompt |
+
+## Session file format
+
+`<out>/sessions/session-<stamp>.json`, one per capture, written owner-only and never overwritten.
+`lazyios diff` and `lazyios report` read it as untrusted input through `sessions.parse`.
+
+```json
+{
+  "format": 1,
+  "started": "2026-10-21T10:00:00",
+  "udid": "<device id>",
+  "seconds": 312.5,
+  "apps": {
+    "Maps": {"version": "3.2", "bytes": 48213, "domains": {"a.example.com": "", "b.example.net": "ads"}}
+  }
+}
+```
+
+- `format` must be exactly `1`. Any other value, or a missing key, a wrong type, a negative or
+  boolean number, is rejected: `parse` returns `None`, the TUI skips the file, the commands
+  exit 2. `FORMAT` changes only for incompatible changes.
+- `domains` maps a name to its tracker category (`ads`, `analytics`, `telemetry`, or `""` when
+  the name is not in the tracker data). Only names learned from TLS SNI or DNS are stored:
+  never IP addresses, never payloads.
+- Limits: 4 MB per file, 2000 apps, 2000 domains per app; 30 files kept per folder.
+  Names are cleaned (`clean_text`, `sanitize_host`) so a hostile file cannot inject control
+  characters into the terminal or the HTML reports.
