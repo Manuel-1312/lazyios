@@ -90,7 +90,12 @@ lazyios [--udid UDID] [--out DIR] [--max-capture-mb MB] [--keep-sessions N]
 lazyios --version
 lazyios --selftest
 python -m lazyios
+
+lazyios diff OLD NEW [--json] [--html FILE] [--fail-on-new-trackers]
+lazyios report SESSION [--json] [--html FILE]
 ```
+
+`diff` and `report` work on saved session files (see below) and need neither a device nor the interface. `diff` lists the domains and trackers that are new or gone per app between two sessions, and `--fail-on-new-trackers` exits 1 when a tracker domain is new, so it can run in CI. `report` shows one session, apps with the most tracker domains first. `report` is not in 0.5.0 yet.
 
 Each device gets its own folder, named after its UDID: captures, screenshots, reports and session history go to `~/lazyios/<udid>/captures`, `screenshots`, `reports` and `sessions` (`--out` changes `~/lazyios`). Settings files (`alerts.json`, `anomaly.json`) stay in `~/lazyios`. Before 0.3, files went straight into `~/lazyios/captures` and the like; they are left where they are. A capture stops by itself when its pcap reaches `--max-capture-mb` (1024 by default).
 
@@ -131,7 +136,7 @@ trackers. Unknown domains and bare addresses take nothing off: there is no evide
 Grades: A 90+, B 75+, C 60+, D 40+, F below. Press `c` in the score tab for the same list.
 
 When a capture stops, the app -> domain names it saw (never IPs or payloads) go to
-`~/lazyios/sessions`, one owner-only file per capture, the newest 30 kept (`--keep-sessions N`,
+`~/lazyios/<udid>/sessions`, one owner-only file per capture, the newest 30 kept (`--keep-sessions N`,
 `0` to keep none). The next capture on the same phone is compared with the last 10: new domains
 per app, new trackers among them, and the app version before and after when it changed. An app
 seen for the first time is marked `first` and nothing is called new.
